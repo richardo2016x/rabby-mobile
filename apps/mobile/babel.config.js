@@ -2,6 +2,25 @@ const child_process = require('child_process');
 const pkg = require('./package.json');
 const loadableAliases = require('./scripts/loadables-aliases.generated.cjs');
 
+function execGit(command, options) {
+  return child_process.execSync(command, options).toString().trim();
+}
+
+function shouldMarkDirtyBuild() {
+  if (process.env.RABBY_MOBILE_BUILD_GIT_DIRTY === 'false') {
+    return false;
+  }
+
+  if (
+    process.env.GITHUB_ACTIONS === 'true' &&
+    process.env.RABBY_MOBILE_BUILD_GIT_DIRTY !== 'true'
+  ) {
+    return false;
+  }
+
+  return !!execGit('git status --porcelain --untracked-files=no');
+}
+
 /** @type {import('@babel/core').ConfigFunction} */
 module.exports = api => {
   const callerName = api.caller(caller => caller?.name) || '';
@@ -35,15 +54,9 @@ module.exports = api => {
   );
 
   const buildGitInfo = (function getBuildEnvVars() {
-    const NORMAL_GET_GIT_HASH = `git log --format="%H" -n1`;
-    const BUILD_GIT_HASH_RAW = child_process
-      .execSync(
-        !process.env.LOCAL_PACK
-          ? NORMAL_GET_GIT_HASH
-          : `[[ -z $(git diff) || ! -z $CI ]] && (${NORMAL_GET_GIT_HASH}) || (git log --format="%H-dirty" -n 1)`,
-      )
-      .toString()
-      .trim();
+    const BUILD_GIT_HASH_RAW = `${execGit('git log --format="%H" -n1')}${
+      shouldMarkDirtyBuild() ? '-dirty' : ''
+    }`;
 
     const isDirty = BUILD_GIT_HASH_RAW.endsWith('-dirty');
     const BUILD_GIT_HASH = `${BUILD_GIT_HASH_RAW.slice(0, 8)}${
@@ -53,22 +66,16 @@ module.exports = api => {
     const BUILD_GIT_HASH_TIME =
       process.platform === 'win32'
         ? ''
-        : child_process
-            .execSync(
+        : execGit(
               `git show --quiet --date='format-local:%Y-%m-%dT%H:%M:%S+00:00' --format="%cd"`,
               { env: { ...process.env, TZ: 'UTC0' } },
-            )
-            .toString()
-            .trim();
+            );
 
     const BUILD_TIME = new Date().toISOString();
     const BUILD_GIT_COMMITOR =
       resolvedBuildChannel !== 'selfhost-reg'
         ? ''
-        : child_process
-            .execSync('git show --quiet --format="%cn"')
-            .toString()
-            .trim();
+        : execGit('git show --quiet --format="%cn"');
 
     return {
       BUILD_GIT_HASH,
