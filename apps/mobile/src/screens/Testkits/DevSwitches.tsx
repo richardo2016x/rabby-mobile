@@ -35,8 +35,10 @@ import {
   RcScreenshot,
 } from '@/assets/icons/settings';
 import {
+  type DebugHomeGasketGlowMode,
   storeApiExpSettingData,
   useBlockSubmitIfFormChangedOnAuth,
+  useDebugHomeGasketGlowMode,
   useDebugSwapHistorySkipLocalLookup,
   useExpScreenCapture,
   useIosForceDisableAlertForSensitiveScene,
@@ -77,6 +79,7 @@ import {
   useGuidanceShown,
 } from '@/components2024/Animations/hooks';
 import { Button } from '@/components2024/Button';
+import { Radio } from '@/components/Radio';
 import { makeBottomSheetProps } from '@/components2024/GlobalBottomSheetModal/utils-help';
 import { NextSearchBar } from '@/components2024/SearchBar';
 import { toast } from '@/components2024/Toast';
@@ -115,6 +118,28 @@ const ANALYTICS_0331_MODAL_HEIGHT = Math.min(
   Dimensions.get('window').height - 140,
   720,
 );
+
+const HOME_GASKET_GLOW_MODE_OPTIONS: {
+  value: DebugHomeGasketGlowMode;
+  label: string;
+}[] = [
+  {
+    value: 'auto',
+    label: 'Auto: follow balance refresh',
+  },
+  {
+    value: 'off',
+    label: 'Off: hide gasket glow',
+  },
+  {
+    value: 'green',
+    label: 'Force green gasket glow',
+  },
+  {
+    value: 'red',
+    label: 'Force red gasket glow',
+  },
+];
 
 function format0331SnapshotResetRemaining(diffMs: number) {
   'worklet';
@@ -949,6 +974,11 @@ function DevTestHomeCenterArea() {
   const { clearOfflineChainTips } = useMockClearOfflineChainTips();
   const { viewedHomeTip, mockResetViewedHomeTip } = useViewedHomeTip();
   const { multiTabs20251205Viewed } = useGuidanceShown();
+  const {
+    debugHomeGasketGlowMode,
+    canDebugHomeGasketGlowMode,
+    setDebugHomeGasketGlowMode,
+  } = useDebugHomeGasketGlowMode();
   const [isShow0331SnapshotModal, setIsShow0331SnapshotModal] = useState(false);
 
   useEffect(() => {
@@ -1046,6 +1076,41 @@ function DevTestHomeCenterArea() {
 
       <View
         style={[styles.secondarySectionContent, { flexDirection: 'column' }]}>
+        {HOME_GASKET_GLOW_MODE_OPTIONS.map(option => (
+          <TouchableOpacity
+            key={option.value}
+            style={styles.radioRowWrapper}
+            disabled={!canDebugHomeGasketGlowMode}
+            onPress={() => {
+              setDebugHomeGasketGlowMode(option.value);
+            }}>
+            <Radio
+              checked={debugHomeGasketGlowMode === option.value}
+              disabled={!canDebugHomeGasketGlowMode}
+              title={option.label}
+              containerStyle={styles.radioContainer}
+              iconStyle={styles.radioIcon}
+              textStyle={[
+                styles.switchLabel,
+                option.value === 'green' && {
+                  color: colors2024['green-default'],
+                },
+                option.value === 'red' && {
+                  color: colors2024['red-default'],
+                },
+              ]}
+              onPress={() => {
+                setDebugHomeGasketGlowMode(option.value);
+              }}
+            />
+          </TouchableOpacity>
+        ))}
+
+        <Text style={[styles.metaLabel, { marginTop: 4 }]}>
+          Regression-only debug control. Production packages ignore forced
+          gasket glow modes.
+        </Text>
+
         <Button
           title={'Reset Home Multiple Tabs Guide'}
           type="ghost"
@@ -1576,6 +1641,21 @@ const getStyles = createGetStyles2024(ctx =>
       fontSize: 16,
       lineHeight: 22,
       color: ctx.colors2024['neutral-body'],
+    },
+    radioRowWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      width: '100%',
+      minWidth: 0,
+    },
+    radioContainer: {
+      padding: 0,
+      margin: 0,
+    },
+    radioIcon: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
     },
     rowWrapper: {
       flexDirection: 'row',

@@ -12,6 +12,7 @@ import {
 import { runIIFEFunc } from '../utils/store';
 import { perfEvents } from '../utils/perf';
 import { logger } from '@/utils/logger';
+import { invalidateFetchAllAccountsCache } from './account';
 
 export const enum PasswordStatus {
   Unknown = -1,
@@ -451,8 +452,11 @@ export function notifyUserManuallyUnlockUIReady() {
       traceAndroidUnlockPerf('refresh_memstore_keyrings_error', {
         error: error instanceof Error ? error.message : String(error),
       });
+    })
+    .finally(() => {
+      invalidateFetchAllAccountsCache();
+      perfEvents.emit('USER_MANUALLY_UNLOCK_UI_READY', ctx);
     });
-  perfEvents.emit('USER_MANUALLY_UNLOCK_UI_READY', ctx);
 }
 
 runIIFEFunc(() => {

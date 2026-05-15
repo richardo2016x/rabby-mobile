@@ -8,6 +8,15 @@ import {
   KeyboardAvoidingView,
   InteractionManager,
 } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import * as Yup from 'yup';
 
 import { default as RcRabbyLogoLight } from './icons/icon-with-logo-light.svg';
@@ -42,7 +51,6 @@ import {
 import { RcIconFaceId, RcIconFingerprint, RcIconInfoForToast } from './icons';
 import { storeApisBiometrics, useBiometrics } from '@/hooks/biometrics';
 import TouchableText from '@/components/Touchable/TouchableText';
-import { sleep } from '@/utils/async';
 import { updateUnlockTime } from '@/core/apis/lock';
 import { Button } from '@/components2024/Button';
 import { NextInput } from '@/components2024/Form/Input';
@@ -98,9 +106,12 @@ const LAYOUTS = {
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
 const BiometricsIconSize = 76;
+const ToastBiometricsIconSize = 18;
+const ToastBiometricsIconWrapSize = 22;
 const UNLOCK_SCREEN_WARMUP_DELAY_MS = 250;
 const POST_UNLOCK_WARMUP_DELAY_MS = 800;
 const POST_UNLOCK_UI_READY_DELAY_MS = 350;
+const AUTO_TRIGGER_UNLOCK_DELAY_MS = isAndroid ? 300 : 500;
 
 const unlockWarmupsStateRef = {
   promise: null as Promise<void> | null,
@@ -155,6 +166,23 @@ function nextFrame() {
   });
 }
 
+async function waitToastPaintBeforeBiometrics() {
+  await nextFrame();
+  await new Promise<void>(resolve => setTimeout(resolve, 80));
+}
+
+function waitAutoBiometricsPromptReady() {
+  if (!isAndroid) {
+    return nextFrame();
+  }
+
+  return new Promise<void>(resolve => {
+    InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function notifyUnlockUIReadyAfterHomePaint() {
   if (!isAndroid) {
     apisLock.notifyUserManuallyUnlockUIReady();
@@ -179,9 +207,10 @@ const toastBiometricsFailed = (message?: string) => {
   prevFailedRef.hide?.();
   prevFailedRef.hide = toastFailed(message);
 };
-const toastUnlocking = () =>
+const toastUnlocking = (options?: { iconNode?: React.ReactNode }) =>
   toastIndicator(i18next.t('page.unlock.unlocking'), {
     isTop: true,
+    iconNode: options?.iconNode,
   });
 
 function traceAndroidUnlockPerf(
@@ -203,6 +232,55 @@ export function BiometricsIcon(props: { isFaceID?: boolean; size?: number }) {
     <RcIconFaceId strokeWidth={2} width={size} height={size} />
   ) : (
     <RcIconFingerprint width={size} height={size} />
+  );
+}
+
+function ToastBreathingBiometricsIcon(props: { isFaceID?: boolean }) {
+  const progress = useSharedValue(0);
+
+  React.useEffect(() => {
+    progress.value = withRepeat(
+      withSequence(
+        withTiming(1, {
+          duration: 720,
+          easing: Easing.inOut(Easing.quad),
+        }),
+        withTiming(0, {
+          duration: 720,
+          easing: Easing.inOut(Easing.quad),
+        }),
+      ),
+      -1,
+    );
+
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [progress]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: 0.72 + progress.value * 0.28,
+      transform: [{ scale: 0.92 + progress.value * 0.12 }],
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: ToastBiometricsIconWrapSize,
+          height: ToastBiometricsIconWrapSize,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        animatedStyle,
+      ]}>
+      <BiometricsIcon
+        isFaceID={props.isFaceID}
+        size={ToastBiometricsIconSize}
+      />
+    </Animated.View>
   );
 }
 
@@ -377,10 +455,17 @@ export default function UnlockScreen() {
     const hidePostAuthToastRef = {
       current: null as null | (() => void),
     };
+    const hideBiometricsToastRef = {
+      current: null as null | (() => void),
+    };
     try {
       traceAndroidUnlockPerf('request_biometrics_start', {
         isFaceID,
       });
+      hideBiometricsToastRef.current = toastUnlocking({
+        iconNode: <ToastBreathingBiometricsIcon isFaceID={isFaceID} />,
+      });
+      await waitToastPaintBeforeBiometrics();
       await apisKeychain.requestGenericPassword({
         purpose: RequestGenericPurpose.DECRYPT_PWD,
         onPlainPassword: async (password, credentials) => {
@@ -388,9 +473,9 @@ export default function UnlockScreen() {
             elapsedMs: Date.now() - startedAt,
             hasTrustedVaultKeyString: !!credentials?.vaultKeyString,
           });
-          if (!isFaceID) {
-            hidePostAuthToastRef.current = toastUnlocking();
-          }
+          hideBiometricsToastRef.current?.();
+          hideBiometricsToastRef.current = null;
+          hidePostAuthToastRef.current = toastUnlocking();
           measureTime.start('UnlockWithBiometrics');
           try {
             traceAndroidUnlockPerf('unlock_app_start', {
@@ -444,19 +529,30 @@ export default function UnlockScreen() {
       traceAndroidUnlockPerf('request_biometrics_end', {
         elapsedMs: Date.now() - startedAt,
       });
+      hideBiometricsToastRef.current?.();
+      hideBiometricsToastRef.current = null;
       updateUnlockTime();
     } catch (error: any) {
       hidePostAuthToastRef.current?.();
+      hidePostAuthToastRef.current = null;
+      hideBiometricsToastRef.current?.();
+      hideBiometricsToastRef.current = null;
+      const parsedKeychainError = parseKeychainError(error);
       traceAndroidUnlockPerf('request_biometrics_error', {
         elapsedMs: Date.now() - startedAt,
         code: error?.code,
         message: error?.message,
+        isCancelledByUser: parsedKeychainError.isCancelledByUser,
       });
       if (__DEV__) {
         console.error(error);
       }
 
       storeApisUnlock.resetUnlocking();
+
+      if (parsedKeychainError.isCancelledByUser) {
+        return;
+      }
 
       if (__DEV__ && incToReset() === 0) {
         toastBiometricsFailed(t('page.unlock.biometrics.usePassword'));
@@ -486,11 +582,10 @@ export default function UnlockScreen() {
             error.code,
           )
         ) {
-          const parsedInfo = parseKeychainError(error);
-          if (__DEV__ && parsedInfo.sysMessage) {
-            parsedInfo.isCancelledByUser
-              ? console.warn(parsedInfo.sysMessage)
-              : console.error(parsedInfo.sysMessage);
+          if (__DEV__ && parsedKeychainError.sysMessage) {
+            parsedKeychainError.isCancelledByUser
+              ? console.warn(parsedKeychainError.sysMessage)
+              : console.error(parsedKeychainError.sysMessage);
           }
         }
       }
@@ -503,25 +598,22 @@ export default function UnlockScreen() {
       return;
     }
     lockBiometricRef.current = true;
-    if (!isFaceID && !isAndroid) {
-      const hideToast = toastUnlocking();
-      await unlockWithBiometrics().finally(() => {
-        lockBiometricRef.current = false;
-      });
-      hideToast();
-    } else {
-      await unlockWithBiometrics().finally(() => {
-        lockBiometricRef.current = false;
-      });
-    }
-  }, [isFaceID, unlockWithBiometrics]);
+    await unlockWithBiometrics().finally(() => {
+      lockBiometricRef.current = false;
+    });
+  }, [unlockWithBiometrics]);
 
   useLayoutEffect(() => {
     incToReset(true);
     const sub = perfEvents.subscribe('AUTO_TRIGGER_UNLOCK', async () => {
-      // wait screen rendered
-      await sleep(500);
+      await waitAutoBiometricsPromptReady();
       if (!isBiometricsEnabled) {
+        return;
+      }
+      if (
+        typeof navigation.isFocused === 'function' &&
+        !navigation.isFocused()
+      ) {
         return;
       }
 
@@ -531,14 +623,14 @@ export default function UnlockScreen() {
     return () => {
       sub.remove();
     };
-  }, [isBiometricsEnabled, processUnlockWithBiometrics]);
+  }, [isBiometricsEnabled, navigation, processUnlockWithBiometrics]);
 
   useFocusEffect(
     useCallback(() => {
       if (params?.disableAutoTriggerUnlock) {
         return;
       }
-      UnlockUIManager.triggerAutoUnlock();
+      UnlockUIManager.triggerAutoUnlock(AUTO_TRIGGER_UNLOCK_DELAY_MS);
     }, [params?.disableAutoTriggerUnlock]),
   );
 

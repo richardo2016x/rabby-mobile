@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ListRenderItem, StyleSheet, View } from 'react-native';
 import { RefreshControl } from 'react-native-gesture-handler';
 import { useTranslation } from 'react-i18next';
@@ -91,6 +97,9 @@ export const TokenList = ({
   const [foldHideList, setFoldHideList] = useState(true);
   const [foldScam, setFoldScam] = useState(true);
   const [isLpTokenEnabled, setIsLpTokenEnabled] = useState(false);
+  const initialRequestIdRef = useRef(0);
+  const [isInitialTokenListPending, setIsInitialTokenListPending] =
+    useState(true);
 
   const focusedTab = useFocusedTab();
   const isFocused = useMemo(() => {
@@ -155,19 +164,30 @@ export const TokenList = ({
   });
   const getTokenList = useTokenList(s => s.getTokenList);
 
-  const refreshTokenList = useCallback(() => {
+  const refreshTokenList = useCallback(async () => {
     if (!currentAddress) {
       return;
     }
-    getTokenList(currentAddress);
+    await getTokenList(currentAddress);
   }, [currentAddress, getTokenList]);
 
   useEffect(() => {
     if (!isFocused) {
       return;
     }
-    refreshTokenList();
-  }, [isFocused, refreshTokenList]);
+    if (!currentAddress) {
+      setIsInitialTokenListPending(false);
+      return;
+    }
+
+    const requestId = ++initialRequestIdRef.current;
+    setIsInitialTokenListPending(true);
+    refreshTokenList().finally(() => {
+      if (requestId === initialRequestIdRef.current) {
+        setIsInitialTokenListPending(false);
+      }
+    });
+  }, [currentAddress, isFocused, refreshTokenList]);
 
   useAppForeground({
     enabled: isFocused,
@@ -223,7 +243,7 @@ export const TokenList = ({
     }
 
     if (
-      (isLoading && items.length === 0) ||
+      ((isInitialTokenListPending || isLoading) && items.length === 0) ||
       (isAllLoading && isLpTokenEnabled)
     ) {
       items.push(
@@ -234,7 +254,7 @@ export const TokenList = ({
       );
     }
 
-    if (!isLoading && items.length === 0) {
+    if (!isInitialTokenListPending && !isLoading && items.length === 0) {
       if (noAnyAssets) {
         // items.push({ type: 'empty-token' });
         items.push({
@@ -260,6 +280,7 @@ export const TokenList = ({
     foldTokens,
     hasFoldTokens,
     isAllLoading,
+    isInitialTokenListPending,
     isLoading,
     isLpTokenEnabled,
     noAnyAssets,

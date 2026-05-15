@@ -48,6 +48,22 @@ type DuplexDefs = {
     };
     post: never;
   };
+  GASKETVIEW_SET_FORCE_GLOW: {
+    receive: {
+      type: 'GASKETVIEW:SET_FORCE_GLOW';
+      info: {
+        mode: 'auto' | 'off' | 'green' | 'red';
+      };
+    };
+    post: never;
+  };
+  GASKETVIEW_READY: {
+    post: {
+      type: 'GASKETVIEW:READY';
+      timestamp: number;
+    };
+    receive: never;
+  };
   // TradingView Chart Messages - Unified message type
   TradingViewMessage: {
     receive: {

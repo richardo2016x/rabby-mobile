@@ -29,6 +29,14 @@ export type CurrentKeychainVersion =
 const DEFAULT_CURRENT_KEYCHAIN_VERSION: CurrentKeychainVersion = '8.2.0-fork';
 const DEFAULT_DEBUG_KEYCHAIN_STORAGE: KeychainStorageType =
   DEFAULT_KEYCHAIN_STORAGE_TYPE;
+export const DEBUG_HOME_GASKET_GLOW_MODES = [
+  'auto',
+  'off',
+  'green',
+  'red',
+] as const;
+export type DebugHomeGasketGlowMode =
+  (typeof DEBUG_HOME_GASKET_GLOW_MODES)[number];
 
 function coerceCurrentKeychainVersion(
   version: unknown,
@@ -62,6 +70,16 @@ function coerceDebugKeychainStorageByVersion(
   };
 }
 
+function coerceDebugHomeGasketGlowMode(
+  value: unknown,
+): DebugHomeGasketGlowMode {
+  return DEBUG_HOME_GASKET_GLOW_MODES.includes(
+    value as DebugHomeGasketGlowMode,
+  )
+    ? (value as DebugHomeGasketGlowMode)
+    : 'auto';
+}
+
 type ScreenshotSettings = {
   androidForceAllowScreenCapture: boolean;
   iosForceAllowScreenRecord: boolean;
@@ -70,6 +88,7 @@ type ScreenshotSettings = {
   blockSubmitIfFormChangedOnAuth: boolean;
   toastOpenApiHttpErrorStatus: boolean;
   debugSwapHistorySkipLocalLookup: boolean;
+  debugHomeGasketGlowMode: DebugHomeGasketGlowMode;
   debugCurrentKeychainVersion: CurrentKeychainVersion;
   debugKeychainStorageByVersion: DebugKeychainStorageByVersion;
 };
@@ -89,6 +108,7 @@ const experimentalSettingsStore = zustandByMMKV<ScreenshotSettings>(
     blockSubmitIfFormChangedOnAuth: false,
     toastOpenApiHttpErrorStatus: false,
     debugSwapHistorySkipLocalLookup: false,
+    debugHomeGasketGlowMode: 'auto',
     debugCurrentKeychainVersion: DEFAULT_CURRENT_KEYCHAIN_VERSION,
     debugKeychainStorageByVersion: makeDefaultDebugKeychainStorageByVersion(),
   },
@@ -566,6 +586,42 @@ export function useDebugSwapHistorySkipLocalLookup() {
   return {
     debugSwapHistorySkipLocalLookup,
     toggleDebugSwapHistorySkipLocalLookup,
+  };
+}
+
+export function useDebugHomeGasketGlowMode() {
+  const rawDebugHomeGasketGlowMode = experimentalSettingsStore(
+    s => s.debugHomeGasketGlowMode,
+  );
+  const debugHomeGasketGlowMode = coerceDebugHomeGasketGlowMode(
+    rawDebugHomeGasketGlowMode,
+  );
+
+  const setDebugHomeGasketGlowMode = useCallback(
+    (nextMode: DebugHomeGasketGlowMode) => {
+      if (!isNonPublicProductionEnv) {
+        return 'auto' as const;
+      }
+
+      const finalMode = coerceDebugHomeGasketGlowMode(nextMode);
+      setExpSettingData(prev => {
+        return {
+          ...prev,
+          debugHomeGasketGlowMode: finalMode,
+        };
+      });
+
+      return finalMode;
+    },
+    [],
+  );
+
+  return {
+    debugHomeGasketGlowMode: isNonPublicProductionEnv
+      ? debugHomeGasketGlowMode
+      : 'auto',
+    canDebugHomeGasketGlowMode: isNonPublicProductionEnv,
+    setDebugHomeGasketGlowMode,
   };
 }
 

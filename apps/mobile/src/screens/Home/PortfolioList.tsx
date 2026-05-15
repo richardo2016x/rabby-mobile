@@ -1,4 +1,11 @@
-import React, { useCallback, useState, useEffect, useMemo, memo } from 'react';
+import React, {
+  useCallback,
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  memo,
+} from 'react';
 import { ListRenderItem, View } from 'react-native';
 import { RefreshControl } from 'react-native-gesture-handler';
 
@@ -77,6 +84,9 @@ export const PortfolioList = ({
 
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
   const [foldDefi, setFoldDefi] = useState(true);
+  const initialRequestIdRef = useRef(0);
+  const [isInitialPortfolioPending, setIsInitialPortfolioPending] =
+    useState(true);
 
   const loadingPortfolio = useProtocols(state => {
     if (!lowerAddress) {
@@ -162,7 +172,9 @@ export const PortfolioList = ({
       },
       {
         show:
-          !!loadingPortfolio && !portfolios.length && !unFoldDefiList.length,
+          (!!loadingPortfolio || isInitialPortfolioPending) &&
+          !portfolios.length &&
+          !unFoldDefiList.length,
         data: Array.from({ length: 2 }, (_, index) => ({
           type: 'loading-defi-skeleton',
           data: 'index-defi' + index.toString(),
@@ -171,6 +183,7 @@ export const PortfolioList = ({
       {
         show:
           !loadingPortfolio &&
+          !isInitialPortfolioPending &&
           portfolios.length === 0 &&
           unFoldDefiList.length === 0,
         data: [
@@ -191,23 +204,35 @@ export const PortfolioList = ({
     filteredPortfolios.foldDeFiValue,
     filteredPortfolios.foldList,
     foldDefi,
+    isInitialPortfolioPending,
     loadingPortfolio,
     portfolios,
     t,
   ]);
 
-  const refreshPortfolioList = useCallback(() => {
+  const refreshPortfolioList = useCallback(async () => {
     if (!lowerAddress) {
       return;
     }
-    updatePortfolio(lowerAddress);
+    await updatePortfolio(lowerAddress);
   }, [lowerAddress, updatePortfolio]);
 
   useEffect(() => {
     if (isFocused) {
-      refreshPortfolioList();
+      if (!lowerAddress) {
+        setIsInitialPortfolioPending(false);
+        return;
+      }
+
+      const requestId = ++initialRequestIdRef.current;
+      setIsInitialPortfolioPending(true);
+      refreshPortfolioList().finally(() => {
+        if (requestId === initialRequestIdRef.current) {
+          setIsInitialPortfolioPending(false);
+        }
+      });
     }
-  }, [isFocused, refreshPortfolioList]);
+  }, [isFocused, lowerAddress, refreshPortfolioList]);
 
   useAppForeground({
     enabled: isFocused,

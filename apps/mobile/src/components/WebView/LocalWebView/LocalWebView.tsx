@@ -276,6 +276,12 @@ export const LocalWebView = ({
             }
             break;
           }
+          case 'GASKETVIEW:READY': {
+            break;
+          }
+          case 'GASKETVIEW:SET_FORCE_GLOW': {
+            break;
+          }
           default: {
             console.warn('Unknown message from WebView', parseInfo);
           }

@@ -207,23 +207,27 @@ export const toastIndicator = (
   msg: string,
   options?: ManagedOptions & {
     isTop?: boolean;
+    iconNode?: React.ReactNode;
   },
 ) => {
-  return toastWithIcon(() => (
-    <ActivityIndicator
-      // eslint-disable-next-line react-native/no-inline-styles
-      style={{
-        marginRight: 6,
-      }}
-      color={ThemeColors2024.light['neutral-title-2']}
-    />
+  const { isTop, iconNode, ...toastOptions } = options || {};
+
+  return toastWithIcon(({ style }) => (
+    <>
+      {iconNode ? (
+        <View style={style}>{iconNode}</View>
+      ) : (
+        <ActivityIndicator
+          style={style}
+          color={ThemeColors2024.light['neutral-title-2']}
+        />
+      )}
+    </>
   ))(msg, {
     duration: 100000,
-    position: options?.isTop
-      ? Toast.positions.TOP + 80
-      : toast.positions.CENTER,
+    position: isTop ? Toast.positions.TOP + 80 : toast.positions.CENTER,
     hideOnPress: false,
-    ...options,
+    ...toastOptions,
   });
 };
 

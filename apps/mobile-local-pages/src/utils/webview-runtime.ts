@@ -66,6 +66,7 @@ window.addEventListener('messageFromRN', function (event) {
     }
     case 'TRADINGVIEW_MESSAGE':
     case 'GASKETVIEW:TOGGLE_LOADING':
+    case 'GASKETVIEW:SET_FORCE_GLOW':
     case 'GOT_WINDOW_INFO': {
       break;
     }

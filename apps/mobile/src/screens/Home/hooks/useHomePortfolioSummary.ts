@@ -10,6 +10,7 @@ import {
 import { makeDefaultSelectData } from '@/store/curveShared';
 import { sceneCurve24hStore } from '@/store/curve24h';
 import { useShallow } from 'zustand/react/shallow';
+import { makeJsEEClass } from '@/core/services/_utils';
 
 type HomeChangeData = Pick<
   Combined24hBalanceData,
@@ -22,6 +23,7 @@ type HomePortfolioState = {
   hasFetchedAccounts: boolean;
   isFetchingAccounts: boolean;
   matteredAccountLength: number;
+  isPendingMatteredAccountLength: boolean;
   isPendingDisplayAddresses: boolean;
   totalBalance: number;
   changeData: HomeChangeData;
@@ -35,6 +37,22 @@ type HomePortfolioState = {
   isCurveFetchingRemote: boolean;
   isAnyRemoteRefreshing: boolean;
 };
+
+export type HomeGasketGlowRefreshCompleteContext = {
+  changeData: HomeChangeData;
+  displayAddresses: string[];
+};
+
+type HomePortfolioEventBusListeners = {
+  GASKET_GLOW_REFRESH_COMPLETE: (
+    ctx: HomeGasketGlowRefreshCompleteContext,
+  ) => void;
+};
+
+const { EventEmitter: HomePortfolioEE } =
+  makeJsEEClass<HomePortfolioEventBusListeners>();
+
+export const homePortfolioEvents = new HomePortfolioEE();
 
 function pickHomeChangeData(data: Combined24hBalanceData): HomeChangeData {
   return {
@@ -110,6 +128,7 @@ function buildInitialState(): HomePortfolioState {
     hasFetchedAccounts: false,
     isFetchingAccounts: false,
     matteredAccountLength: 0,
+    isPendingMatteredAccountLength: true,
     isPendingDisplayAddresses: true,
     totalBalance: 0,
     changeData: EMPTY_HOME_CHANGE_DATA,
@@ -132,6 +151,8 @@ function isSameState(prev: HomePortfolioState, next: HomePortfolioState) {
     prev.hasFetchedAccounts === next.hasFetchedAccounts &&
     prev.isFetchingAccounts === next.isFetchingAccounts &&
     prev.matteredAccountLength === next.matteredAccountLength &&
+    prev.isPendingMatteredAccountLength ===
+      next.isPendingMatteredAccountLength &&
     prev.isPendingDisplayAddresses === next.isPendingDisplayAddresses &&
     prev.totalBalance === next.totalBalance &&
     prev.changeData.rawChange === next.changeData.rawChange &&
@@ -230,6 +251,8 @@ function buildHomePortfolioState(): HomePortfolioState {
     hasFetchedAccounts: accountState.hasFetchedAccounts,
     isFetchingAccounts: accountState.isFetchingAccounts,
     matteredAccountLength: balanceState.matteredAccountLength,
+    isPendingMatteredAccountLength:
+      !balanceState.hasResolvedMatteredAccountLength,
     isPendingDisplayAddresses,
     totalBalance: balanceState.totalBalance,
     changeData,
@@ -254,16 +277,42 @@ const homePortfolioStore = zCreate<HomePortfolioState>(() =>
 
 let hasStartedHomePortfolioLifecycle = false;
 
+function isHomeGasketGlowRefreshBusy(state: HomePortfolioState) {
+  return state.isBalanceFetchingRemote || state.is24hChangeFetchingRemote;
+}
+
+function notifyHomePortfolioEvents(
+  prevState: HomePortfolioState,
+  nextState: HomePortfolioState,
+) {
+  const didFinishRefresh =
+    isHomeGasketGlowRefreshBusy(prevState) &&
+    !isHomeGasketGlowRefreshBusy(nextState);
+
+  if (
+    didFinishRefresh &&
+    prevState.displayAddresses.length > 0 &&
+    !prevState.showBalanceLoadingWithoutLocal &&
+    nextState.changeData.rawChange &&
+    !nextState.changeData.isLoss
+  ) {
+    homePortfolioEvents.emit('GASKET_GLOW_REFRESH_COMPLETE', {
+      changeData: nextState.changeData,
+      displayAddresses: nextState.displayAddresses,
+    });
+  }
+}
+
 function syncHomePortfolioState() {
+  const prevState = homePortfolioStore.getState();
   const nextState = buildHomePortfolioState();
 
-  homePortfolioStore.setState(prev => {
-    if (isSameState(prev, nextState)) {
-      return prev;
-    }
+  if (isSameState(prevState, nextState)) {
+    return;
+  }
 
-    return nextState;
-  });
+  homePortfolioStore.setState(nextState);
+  notifyHomePortfolioEvents(prevState, nextState);
 }
 
 function ensureHomePortfolioLifecycle() {
@@ -289,6 +338,17 @@ export function useHomePortfolioStore<T>(
   ensureHomePortfolioLifecycle();
 
   return homePortfolioStore(selector);
+}
+
+export function subscribeHomeGasketGlowRefreshComplete(
+  listener: HomePortfolioEventBusListeners['GASKET_GLOW_REFRESH_COMPLETE'],
+) {
+  ensureHomePortfolioLifecycle();
+
+  return homePortfolioEvents.subscribe(
+    'GASKET_GLOW_REFRESH_COMPLETE',
+    listener,
+  );
 }
 
 export function useHomePortfolioSummary() {

@@ -7,12 +7,10 @@ import React, {
 } from 'react';
 import { Dimensions, Platform, TouchableOpacity, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import usePrevious from 'react-use/lib/usePrevious';
 
 import { useTheme2024 } from '@/hooks/theme';
 import { createGetStyles2024 } from '@/utils/styles';
 
-import addressBalanceStore from '@/store/balance';
 import { matomoRequestEvent } from '@/utils/analytics';
 
 import { BlurShadowView } from '@/components2024/BluerShadow';
@@ -36,10 +34,13 @@ import {
 import { MODAL_NAMES } from '@/components2024/GlobalBottomSheetModal/types';
 import { apiGlobalModal } from '@/components2024/GlobalBottomSheetModal/apiGlobalModal';
 import { computeBalanceChange } from '@/core/apis/balance';
-import { useHomeStartupReady } from '@/core/utils/homeStartupReady';
 import { balance24hStore } from '@/store/balance24h';
-import { useShallow } from 'zustand/react/shallow';
-import { useHomePortfolioStore } from '../hooks/useHomePortfolioSummary';
+import {
+  subscribeHomeGasketGlowRefreshComplete,
+  type HomeGasketGlowRefreshCompleteContext,
+} from '../hooks/useHomePortfolioSummary';
+import { useDebugHomeGasketGlowMode } from '@/hooks/appSettings';
+import { useMemoizedFn } from 'ahooks';
 
 function MultiPinnedAddressList({
   pinnedAccountList,
@@ -136,25 +137,6 @@ export function MultiAddressHomeHeader(
   } & RNViewProps,
 ): JSX.Element {
   const { style, onRefresh } = props;
-  const {
-    changeData: data,
-    showBalanceLoadingWithoutLocal,
-    showChangeLoadingWithoutLocal,
-    isCurveAnyAddrLoading,
-  } = useHomePortfolioStore(
-    useShallow(state => ({
-      changeData: state.changeData,
-      showBalanceLoadingWithoutLocal: state.showBalanceLoadingWithoutLocal,
-      showChangeLoadingWithoutLocal: state.showChangeLoadingWithoutLocal,
-      isCurveAnyAddrLoading: state.isCurveAnyAddrLoading,
-    })),
-  );
-  const startupReady = useHomeStartupReady();
-  const shouldCoverLocalWebViewLoading =
-    !startupReady ||
-    showBalanceLoadingWithoutLocal ||
-    showChangeLoadingWithoutLocal ||
-    isCurveAnyAddrLoading;
 
   const { t } = useTranslation();
   const { styles, colors2024, isLight } = useTheme2024({ getStyle });
@@ -165,44 +147,87 @@ export function MultiAddressHomeHeader(
 
   const [couldRenderLocalWebView, setCouldRenderLocalWebView] = useState(false);
   const [isLocalWebViewReady, setIsLocalWebViewReady] = useState(false);
+  const { debugHomeGasketGlowMode } = useDebugHomeGasketGlowMode();
 
   const gasketWebViewRef = useRef<LocalWebView>(null);
 
-  const { loadBalanceFromApiStage } =
-    addressBalanceStore.useLoadBalanceFromApiStage();
-  const previousLoading = usePrevious(loadBalanceFromApiStage);
   const [isAnimRunning, setIsAnimRunning] = useState(false);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (!__DEV__ && data.isLoss) return;
 
+  const playGasketGlow = useMemoizedFn((isPositive: boolean) => {
     const durationMs = IS_IOS ? 2000 : 2500;
-
-    if (
-      data.rawChange &&
-      loadBalanceFromApiStage !== 'loading' &&
-      previousLoading === 'loading'
-    ) {
-      setIsAnimRunning(true);
-      gasketWebViewRef.current?.sendMessage?.({
-        type: 'GASKETVIEW:TOGGLE_LOADING',
-        info: {
-          loading: previousLoading,
-          isPositive: !data.isLoss,
-        },
-        animationDurationMs: durationMs,
-        animationGradientBorderRadius: SIZES.cardContentRadius,
-      });
-    }
 
     if (animTimerRef.current) {
       clearTimeout(animTimerRef.current);
     }
+
+    setIsAnimRunning(true);
+    gasketWebViewRef.current?.sendMessage?.({
+      type: 'GASKETVIEW:TOGGLE_LOADING',
+      info: {
+        loading: true,
+        isPositive,
+      },
+      animationDurationMs: durationMs,
+      animationGradientBorderRadius: SIZES.cardContentRadius,
+    });
+
     animTimerRef.current = setTimeout(
       () => setIsAnimRunning(false),
       durationMs,
     );
-  }, [data.isLoss, data.rawChange, loadBalanceFromApiStage, previousLoading]);
+  });
+
+  const handleGasketGlowRefreshComplete = useMemoizedFn(
+    ({ changeData }: HomeGasketGlowRefreshCompleteContext) => {
+      if (debugHomeGasketGlowMode !== 'auto') {
+        return;
+      }
+      if (!couldRenderLocalWebView || !isLocalWebViewReady) {
+        return;
+      }
+      if (!changeData.rawChange || changeData.isLoss) {
+        return;
+      }
+
+      playGasketGlow(true);
+    },
+  );
+
+  useEffect(() => {
+    const subscription = subscribeHomeGasketGlowRefreshComplete(
+      handleGasketGlowRefreshComplete,
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleGasketGlowRefreshComplete]);
+
+  useEffect(() => {
+    return () => {
+      if (animTimerRef.current) {
+        clearTimeout(animTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!couldRenderLocalWebView || !isLocalWebViewReady) {
+      return;
+    }
+
+    if (debugHomeGasketGlowMode !== 'auto') {
+      setIsAnimRunning(false);
+    }
+
+    gasketWebViewRef.current?.sendMessage?.({
+      type: 'GASKETVIEW:SET_FORCE_GLOW',
+      info: {
+        mode: debugHomeGasketGlowMode,
+      },
+    });
+  }, [couldRenderLocalWebView, debugHomeGasketGlowMode, isLocalWebViewReady]);
 
   const modalRef =
     useRef<ReturnType<typeof createGlobalBottomSheetModal2024>>(undefined);
@@ -276,8 +301,18 @@ export function MultiAddressHomeHeader(
               renderLoading={() => (
                 <View style={styles.localWebViewLoadingFallback} />
               )}
-              onLoadEnd={() => {
-                setIsLocalWebViewReady(true);
+              onLoadStart={() => {
+                setIsLocalWebViewReady(false);
+              }}
+              onMessage={event => {
+                try {
+                  const message = JSON.parse(event.nativeEvent.data);
+                  if (message?.type === 'GASKETVIEW:READY') {
+                    setIsLocalWebViewReady(true);
+                  }
+                } catch {
+                  // Ignore non-JSON messages from the page.
+                }
               }}
             />
           ) : null}
@@ -307,7 +342,10 @@ export function MultiAddressHomeHeader(
             end={isLight ? { x: 0.75, y: 0.5 } : { x: -0.14, y: 0.59 }}
             style={[
               styles.curveCardGradientBg,
-              isAnimRunning && styles.curveCardGradientBgWithAnim,
+              (isAnimRunning ||
+                debugHomeGasketGlowMode === 'green' ||
+                debugHomeGasketGlowMode === 'red') &&
+                styles.curveCardGradientBgWithAnim,
             ]}
           />
           <TouchableOpacity
@@ -319,9 +357,6 @@ export function MultiAddressHomeHeader(
             onPress={() => {
               handleWalletsListPress();
             }}>
-            {shouldCoverLocalWebViewLoading ? (
-              <View pointerEvents="none" style={styles.curveCardCenterMask} />
-            ) : null}
             <MultiChart
               hideType={hideType}
               style={[
@@ -448,15 +483,6 @@ const getStyle = createGetStyles2024(({ colors2024, isLight }) => {
       borderWidth: 0,
       backgroundColor: 'transparent',
       // ...makeDebugBorder('purple'),
-    },
-    curveCardCenterMask: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      right: 0,
-      borderRadius: SIZES.cardContentRadius,
-      backgroundColor: isLight ? colors2024['neutral-bg-0'] : '#232428',
     },
     noAddressCard: {
       paddingBottom: 20,

@@ -63,6 +63,7 @@ import { zCreate } from '@/core/utils/reexports';
 import { UpdaterOrPartials } from '@/core/utils/store';
 import { HOME_TOP_HEADER_SIZES } from '@/constant/home';
 import { useValueFromSharedValue } from '@/hooks/reanimated';
+import { apisHomeTabIndex, useHomeTabIndex } from '@/hooks/navigation';
 import { getHomeTabIndicatorWidth } from '@/screens/Home/utils/homeTabIndicator';
 import { Text } from '@/components/Typography';
 const MS_PLAY_ONCE = getLottieAnimationDurationInMS(
@@ -207,6 +208,9 @@ const showAndPlayAnimationOnJs = () => {
   if (guidancePersistedStore.getState().multiTabs20251205Viewed) {
     return;
   }
+  if (!apisHomeTabIndex.isHomeAtFirstTab()) {
+    return;
+  }
 
   toggleGuidanceVisible(true);
   animTimerRef.current && clearTimeout(animTimerRef.current);
@@ -240,6 +244,7 @@ export const HomeGuidanceMultipleTabs = ({
 }) => {
   const { styles, reanimatedStyles } = useTheme2024({ getStyle });
   const { t } = useTranslation();
+  const { tabIndex } = useHomeTabIndex();
 
   const { guidanceVisible } = useGuidanceMultipleTabsVisible();
 
@@ -366,12 +371,18 @@ export const HomeGuidanceMultipleTabs = ({
     }
   }, [previousVisible, guidanceVisible, wrapperOpacity]);
 
+  useEffect(() => {
+    if (guidanceVisible && tabIndex !== 0) {
+      isomorphicOnCloseAnim();
+    }
+  }, [guidanceVisible, tabIndex]);
+
   const rStyles = {
     content: useAnimatedStyle(reanimatedStyles.content),
   };
 
   if (!secondaryIndicatorAbsLayout) return null;
-  if (IS_IOS && !debouncedVisible) return null;
+  if (!debouncedVisible) return null;
 
   return (
     // <GestureDetector gesture={panRightToLeftGesture} />

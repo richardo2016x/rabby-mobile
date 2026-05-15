@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   GestureResponderEvent,
   Pressable,
@@ -8,7 +8,6 @@ import {
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import usePrevious from 'react-use/lib/usePrevious';
 
 import { useSafeSetNavigationOptions } from '@/components/AppStatusBar';
 import { E2E_ID } from '@/constant/e2e';
@@ -35,7 +34,6 @@ import {
 } from '@/constant/home';
 import { useMemoizedFn } from 'ahooks';
 import { useHideBalance } from '../hooks/useHideBalance';
-import { LocalWebView } from '@/components/WebView/LocalWebView/LocalWebView';
 import { AddressListScreenButton } from '@/screens/Address/AddressListScreenButton';
 import { useCurrency } from '@/hooks/useCurrency';
 import { formatSmallCurrencyValueParts } from '@/utils/currency';
@@ -82,7 +80,6 @@ export function TabsTopHeader(): JSX.Element {
     showBalanceLoadingWithoutLocal,
     showChangeLoadingWithoutLocal,
     isAnyRemoteRefreshing,
-    isChangeAnyLoading,
     changeData,
   } = useHomePortfolioStore(
     useShallow(state => ({
@@ -90,12 +87,10 @@ export function TabsTopHeader(): JSX.Element {
       showBalanceLoadingWithoutLocal: state.showBalanceLoadingWithoutLocal,
       showChangeLoadingWithoutLocal: state.showChangeLoadingWithoutLocal,
       isAnyRemoteRefreshing: state.isAnyRemoteRefreshing,
-      isChangeAnyLoading: state.isChangeAnyLoading,
       changeData: state.changeData,
     })),
   );
   const data = changeData;
-  const scene24hLoading = isChangeAnyLoading;
 
   const { navigation } = useSafeSetNavigationOptions();
   const { t } = useTranslation();
@@ -156,23 +151,6 @@ export function TabsTopHeader(): JSX.Element {
   const showHeaderSideLoadingIndicator = useMemo(() => {
     return showBalanceLoadingWithoutLocal || isAnyRemoteRefreshing;
   }, [isAnyRemoteRefreshing, showBalanceLoadingWithoutLocal]);
-
-  const gasketWebViewRef = useRef<LocalWebView>(null);
-
-  const previousLoading = usePrevious(scene24hLoading);
-  useEffect(() => {
-    if (data.isLoss) {
-      return;
-    }
-    if (!scene24hLoading && previousLoading) {
-      gasketWebViewRef.current?.sendMessage?.({
-        type: 'GASKETVIEW:TOGGLE_LOADING',
-        info: {
-          loading: previousLoading,
-        },
-      });
-    }
-  }, [data.isLoss, previousLoading, scene24hLoading]);
 
   const { opacityStyle, pullPercent } = useHomeDrawerOpacityStyle();
 
