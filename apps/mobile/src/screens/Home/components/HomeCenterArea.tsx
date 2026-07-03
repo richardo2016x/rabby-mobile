@@ -1,5 +1,11 @@
-import React, { useCallback, useMemo, useRef } from 'react';
-import { View } from 'react-native';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { InteractionManager, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 
 import { RateModal } from '@/components/RateModal/RateModal';
@@ -25,15 +31,48 @@ import { useConvertDustBanner } from '../hooks/useConvertDustBanner';
 import { useRabbyAppNavigation } from '@/hooks/navigation';
 import { RootNames } from '@/constant/layout';
 import { IS_ANDROID, isBridgelessRuntimeEnabled } from '@/core/native/utils';
+import { useHomePostStartupReady } from '@/core/utils/homeStartupReady';
+
+const RECEIVE_TIP_AFTER_POST_READY_DELAY_MS = 1500;
 
 export function HomeCenterArea() {
   const { styles } = useTheme2024({
     getStyle,
   });
   const navigation = useRabbyAppNavigation();
+  const homePostStartupReady = useHomePostStartupReady();
+  const [receiveTipReady, setReceiveTipReady] = useState(false);
+
+  useEffect(() => {
+    if (!homePostStartupReady) {
+      setReceiveTipReady(false);
+      return;
+    }
+
+    let disposed = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      timeoutId = setTimeout(() => {
+        if (!disposed) {
+          setReceiveTipReady(true);
+        }
+      }, RECEIVE_TIP_AFTER_POST_READY_DELAY_MS);
+    });
+
+    return () => {
+      disposed = true;
+      interactionHandle.cancel?.();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [homePostStartupReady]);
 
   const { accountToShowReceiveTip, isLoadingAccountToShowReceiveTip } =
-    useAccountHomeShowReceiveTip();
+    useAccountHomeShowReceiveTip(undefined, {
+      enabled: receiveTipReady,
+      source: 'HomeCenterArea.receiveTip',
+    });
   const { shouldShowRateGuideOnHome } = useExposureRateGuide();
   const offlineChainData = useOfflineChain();
   const txCount = rateGuideLastExposureState(state => state.txCount);

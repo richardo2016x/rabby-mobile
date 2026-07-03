@@ -2,9 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { useShallow } from 'zustand/react/shallow';
 
-import { keyringService } from '@/core/services';
-import { apisAutoLock, apisLock } from '@/core/apis';
-import { PasswordStatus } from '@/core/apis/lock';
+import { keyringService } from '@/core/services/keyringRuntime';
 import { useRabbyAppNavigation } from './navigation';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -27,17 +25,52 @@ import { RefLikeObject } from '@/utils/type';
 const isAndroid = Platform.OS === 'android';
 const isIOS = Platform.OS === 'ios';
 
+const PasswordStatus = {
+  Unknown: -1,
+  UseBuiltIn: 1,
+  Custom: 11,
+} as const;
+
+function loadApisLock() {
+  return import('@/core/apis/lock');
+}
+
+function loadApisAccount() {
+  return import('@/core/apis/account');
+}
+
+function loadApisAutoLock() {
+  return import('@/core/apis/autoLock');
+}
+
+let hasSubscribedUnlockTimeEvent = false;
+function subscribeUnlockTimeEvent(
+  apisLock: Awaited<ReturnType<typeof loadApisLock>>,
+) {
+  if (hasSubscribedUnlockTimeEvent) {
+    return;
+  }
+
+  hasSubscribedUnlockTimeEvent = true;
+  apisLock.unlockTimeEvent.addListener('updated', () => {
+    setAppLock(prev => ({
+      ...prev,
+      isUnlockSessionValid: apisLock.isUnlockSessionValid(),
+    }));
+  });
+}
+
 type AppLockState = {
   appUnlocked: boolean;
   isUnlockSessionValid: boolean;
   hasVisibleAccounts: boolean;
   hasStoredKeyrings: boolean;
-  pwdStatus: PasswordStatus;
+  pwdStatus: number;
 };
 const zAppLockStore = zCreate<AppLockState>((set, get) => {
   return {
     appUnlocked: false,
-    isUnlockSessionValid: apisLock.isUnlockSessionValid(),
+    isUnlockSessionValid: false,
     hasVisibleAccounts: false,
     hasStoredKeyrings: false,
     pwdStatus: PasswordStatus.Unknown,
@@ -50,14 +83,7 @@ function setAppLock(valOrFunc: UpdaterOrPartials<AppLockState>) {
 // iife
 setAppLock({
   appUnlocked: keyringService.isUnlocked(),
-  isUnlockSessionValid: apisLock.isUnlockSessionValid(),
-});
-
-apisLock.unlockTimeEvent.addListener('updated', () => {
-  setAppLock(prev => ({
-    ...prev,
-    isUnlockSessionValid: apisLock.isUnlockSessionValid(),
-  }));
+  isUnlockSessionValid: false,
 });
 
 function getIsAppUnlocked() {
@@ -110,6 +136,11 @@ export function usePasswordStatus() {
 }
 
 export const getTriedUnlock = async () => {
+  const [apisLock, apisAutoLock] = await Promise.all([
+    loadApisLock(),
+    loadApisAutoLock(),
+  ]);
+  subscribeUnlockTimeEvent(apisLock);
   return apisLock
     .tryAutoUnlockRabbyMobileWithUpdateUnlockTime()
     .then(async result => {
@@ -132,6 +163,50 @@ export const getTriedUnlock = async () => {
     });
 };
 
+async function getHasVisibleAccountsForBootstrap() {
+  try {
+    const apisAccount = await loadApisAccount();
+    return await apisAccount.hasVisibleAccounts();
+  } catch (error) {
+    console.error('getHasVisibleAccountsForBootstrap::error', error);
+    const accounts = await keyringService.getAllVisibleAccountsArray();
+    return accounts.length > 0;
+  }
+}
+
+export const loadBootstrapAppLockState = async () => {
+  const [apisLock, apisAutoLock] = await Promise.all([
+    loadApisLock(),
+    loadApisAutoLock(),
+  ]);
+  subscribeUnlockTimeEvent(apisLock);
+  const hasVisibleAccounts = await getHasVisibleAccountsForBootstrap();
+  const appUnlocked = keyringService.isUnlocked();
+  const isUnlockSessionValid = apisLock.isUnlockSessionValid();
+
+  if (!appUnlocked && isUnlockSessionValid) {
+    apisAutoLock.refreshAutolockTimeout();
+  }
+
+  const nextState = {
+    appUnlocked,
+    isUnlockSessionValid,
+    hasVisibleAccounts,
+    hasStoredKeyrings:
+      hasVisibleAccounts ||
+      keyringService.hasVault() ||
+      keyringService.hasEncryptedKeyringData() ||
+      keyringService.hasUnencryptedKeyringData(),
+  };
+
+  setAppLock(prev => ({
+    ...prev,
+    ...nextState,
+  }));
+
+  return nextState;
+};
+
 /**
  * @description only use this hooks on the top level of your app
  */
@@ -145,6 +220,8 @@ export const fetchLockInfo = makeAvoidParallelAsyncFunc(async () => {
   isLoadingRef.current = true;
 
   try {
+    const apisLock = await loadApisLock();
+    subscribeUnlockTimeEvent(apisLock);
     const response = await apisLock.getRabbyLockInfo();
     const accounts = await keyringService.getAllVisibleAccountsArray();
 
@@ -337,6 +414,7 @@ export const shouldRedirectToSetPasswordBefore2024 = async ({
   // if (lockInfo.pwdStatus === PasswordStatus.Custom) {
   //   return false;
   // }
+  const apisLock = await loadApisLock();
   const shouldAsk = await apisLock.shouldAskSetPassword();
   if (!shouldAsk) {
     return false;

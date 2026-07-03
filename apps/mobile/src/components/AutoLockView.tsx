@@ -1,12 +1,10 @@
 import React from 'react';
 import { Keyboard, PanResponder, View, ViewProps } from 'react-native';
 
-import * as apisAutoLock from '@/core/apis/autoLock';
 import { getLatestNavigationName } from '@/utils/navigation';
 import { RootNames } from '@/constant/layout';
-import { keyringService } from '@/core/services';
+import { keyringService } from '@/core/services/keyringRuntime';
 import { throttle } from 'lodash';
-import { autoLockEvent } from '@/core/apis/autoLock';
 import { BottomSheetView } from '@gorhom/bottom-sheet';
 import {
   AsName,
@@ -14,6 +12,10 @@ import {
   useComponentByAsProp,
 } from '@/hooks/common/useComponentAsProp';
 import { perfEvents } from '@/core/utils/perf';
+import {
+  callAutoLockService,
+  waitAutoLockService,
+} from '@/core/services/autoLockDeferredClient';
 
 const implUiRefreshTimeout = throttle(
   () => {
@@ -22,12 +24,15 @@ const implUiRefreshTimeout = throttle(
 
     // if (__DEV__) console.debug('uiRefreshTimeout');
 
-    return apisAutoLock.refreshAutolockTimeout();
+    return callAutoLockService('refreshAutolockTimeout', [], {
+      timeoutMs: 5000,
+    }).catch(error => {
+      console.error('refreshAutolockTimeout::deferred::error', error);
+    });
   },
   250 * 3,
   { leading: true },
 );
-autoLockEvent.addListener('triggerRefresh', implUiRefreshTimeout);
 
 export function useRefreshAutoLockPanResponder() {
   return React.useMemo(() => {
@@ -77,11 +82,36 @@ export default function AutoLockView<
 
 function ForAppNav(props: Props<'View'>) {
   React.useEffect(() => {
-    const subUnlock = perfEvents.subscribe(
-      'USER_MANUALLY_UNLOCK',
-      apisAutoLock.handleUnlock,
-    );
-    keyringService.on('lock', apisAutoLock.handleLock);
+    let cleanupAutoLock: (() => void) | null = null;
+    let cancelled = false;
+
+    waitAutoLockService({
+      timeoutMs: 5000,
+    })
+      .then(autoLockService => {
+        if (cancelled) {
+          return;
+        }
+
+        const subUnlock = perfEvents.subscribe(
+          'USER_MANUALLY_UNLOCK',
+          autoLockService.handleUnlock,
+        );
+        const removeTriggerRefresh =
+          autoLockService.subscribeTriggerRefresh(implUiRefreshTimeout);
+        keyringService.on('lock', autoLockService.handleLock);
+
+        cleanupAutoLock = () => {
+          subUnlock.remove();
+          removeTriggerRefresh();
+          keyringService.off('lock', autoLockService.handleLock);
+        };
+      })
+      .catch(error => {
+        if (!cancelled) {
+          console.error('AutoLockView.ForAppNav::setupAutoLock::error', error);
+        }
+      });
 
     const hideEvent = Keyboard.addListener(
       'keyboardDidHide',
@@ -94,8 +124,8 @@ function ForAppNav(props: Props<'View'>) {
 
     // release event listeners on destruction
     return () => {
-      subUnlock.remove();
-      keyringService.off('lock', apisAutoLock.handleLock);
+      cancelled = true;
+      cleanupAutoLock?.();
 
       hideEvent.remove();
       showEvent.remove();

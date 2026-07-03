@@ -251,16 +251,19 @@ export function shouldLogOpenApiFailureResponse(response: {
 }) {
   const apiCode = extractOpenApiResponseCode(response.data);
 
-  if (typeof response.status === 'number' && response.status !== 200) {
+  if (
+    typeof response.status === 'number' &&
+    (response.status < 200 || response.status >= 300)
+  ) {
     return true;
   }
 
   if (typeof apiCode === 'number') {
-    return apiCode !== 200;
+    return apiCode !== 0 && apiCode !== 200;
   }
 
   if (typeof apiCode === 'string') {
-    return apiCode !== '200';
+    return apiCode !== '0' && apiCode !== '200';
   }
 
   return false;

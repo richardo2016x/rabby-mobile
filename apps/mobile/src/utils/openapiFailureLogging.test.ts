@@ -40,6 +40,13 @@ describe('openapi failure logging', () => {
     expect(
       shouldLogOpenApiFailureResponse({
         status: 200,
+        data: { err_code: 0 },
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldLogOpenApiFailureResponse({
+        status: 204,
         data: { err_code: 200 },
       }),
     ).toBe(false);

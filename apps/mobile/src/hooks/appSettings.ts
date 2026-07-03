@@ -1,23 +1,21 @@
 import DeviceUtils from '@/core/utils/device';
 import { zustandByMMKV } from '@/core/storage/mmkv';
 import { isNonPublicProductionEnv } from '@/constant';
-import {
-  resolveValFromUpdater,
-  runIIFEFunc,
-  UpdaterOrPartials,
-} from '@/core/utils/store';
+import { resolveValFromUpdater, UpdaterOrPartials } from '@/core/utils/store';
 import { useShallow } from 'zustand/react/shallow';
 import { zCreate } from '@/core/utils/reexports';
 import { DEFAULT_AUTO_LOCK_MINUTES } from '@/constant/autoLock';
-import * as apisAutoLock from '@/core/apis/autoLock';
 import {
   KEYCHAIN_STORAGE_TYPES,
   DEFAULT_KEYCHAIN_STORAGE_TYPE,
   coerceKeychainStorageType,
   type KeychainStorageType,
 } from '@/core/apis/keychainCommon';
-import { preferenceService } from '@/core/services';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
+import {
+  callAutoLockService,
+  waitAutoLockService,
+} from '@/core/services/autoLockDeferredClient';
 
 const isIOS = DeviceUtils.isIOS();
 
@@ -505,9 +503,7 @@ export function useScreenshotDebugToast() {
 const autoLockState = zCreate<{
   minutes: number;
 }>(() => ({
-  minutes:
-    apisAutoLock.getPersistedAutoLockTimes()?.minutes ||
-    DEFAULT_AUTO_LOCK_MINUTES,
+  minutes: DEFAULT_AUTO_LOCK_MINUTES,
 }));
 function setAutoLockMinutes(valOrFunc: UpdaterOrPartials<number>) {
   autoLockState.setState(prev => {
@@ -517,24 +513,45 @@ function setAutoLockMinutes(valOrFunc: UpdaterOrPartials<number>) {
   });
 }
 
-runIIFEFunc(() => {
-  const times = apisAutoLock.getPersistedAutoLockTimes();
-  setAutoLockMinutes(times.minutes);
-});
-
 export function useAutoLockTimeMinites() {
   const autoLockMinutes = autoLockState(s => s.minutes);
+
+  useEffect(() => {
+    let cancelled = false;
+    waitAutoLockService({
+      timeoutMs: 5000,
+    })
+      .then(autoLockService => {
+        if (cancelled) {
+          return;
+        }
+        const times = autoLockService.getPersistedAutoLockTimes();
+        setAutoLockMinutes(times.minutes);
+      })
+      .catch(error => {
+        console.error('useAutoLockTimeMinites::load::error', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return { autoLockMinutes };
 }
 
 const onAutoLockTimeMsChange = (ms: number) => {
-  const minutes = apisAutoLock.coerceAutoLockTimeout(ms).minutes;
+  const minutes = Number((ms / 60_000).toFixed(2));
   setAutoLockMinutes(minutes);
-  preferenceService.setPreference({
-    autoLockTime: minutes,
-  });
-  apisAutoLock.refreshAutolockTimeout();
+  callAutoLockService('setAutoLockTimeMs', [ms], {
+    timeoutMs: 5000,
+  })
+    .then(times => {
+      setAutoLockMinutes(times.minutes);
+    })
+    .catch(error => {
+      console.error('onAutoLockTimeMsChange::error', error);
+    });
 };
 export function useAutoLockTimeMs() {
   const autoLockMinutes = autoLockState(s => s.minutes);

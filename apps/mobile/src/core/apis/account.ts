@@ -171,6 +171,7 @@ const fetchAllAccountsCacheRef = {
 
 type FetchAllAccountsOptions = {
   force?: boolean;
+  source?: string;
 };
 
 export function invalidateFetchAllAccountsCache() {
@@ -184,9 +185,28 @@ async function fetchAllAccountsProcess() {
   traceAndroidUnlockAccountPerf('get_all_visible_accounts_start');
 
   try {
+    const keyringStartedAt = Date.now();
     const visibleAccounts = await keyringService.getAllVisibleAccountsArray();
+    traceAndroidUnlockAccountPerf('get_all_visible_accounts_keyring_end', {
+      elapsedMs: Date.now() - keyringStartedAt,
+      count: visibleAccounts.length,
+    });
+
+    const hydrateStartedAt = Date.now();
     await addressBalanceStore.hydrateCachedBalancesForAccounts(visibleAccounts);
+    traceAndroidUnlockAccountPerf('get_all_visible_accounts_hydrate_end', {
+      elapsedMs: Date.now() - hydrateStartedAt,
+      count: visibleAccounts.length,
+    });
+
+    const balanceMapStartedAt = Date.now();
     const balanceMap = addressBalanceStore.getAddressValueMap();
+    traceAndroidUnlockAccountPerf('get_all_visible_accounts_balance_map_end', {
+      elapsedMs: Date.now() - balanceMapStartedAt,
+      count: Object.keys(balanceMap).length,
+    });
+
+    const buildRowsStartedAt = Date.now();
     nextAccounts = visibleAccounts.map(account => {
       const balance = balanceMap[account.address.toLowerCase()];
       return {
@@ -196,7 +216,12 @@ async function fetchAllAccountsProcess() {
         balance: balance?.totalBalance || 0,
       };
     });
+    traceAndroidUnlockAccountPerf('get_all_visible_accounts_build_rows_end', {
+      elapsedMs: Date.now() - buildRowsStartedAt,
+      count: nextAccounts.length,
+    });
 
+    const aliasesStartedAt = Date.now();
     await Promise.allSettled(
       nextAccounts.map(async (account, idx) => {
         const aliasName = contactService.getAliasByAddress(account.address);
@@ -206,6 +231,10 @@ async function fetchAllAccountsProcess() {
         };
       }),
     );
+    traceAndroidUnlockAccountPerf('get_all_visible_accounts_aliases_end', {
+      elapsedMs: Date.now() - aliasesStartedAt,
+      count: nextAccounts.length,
+    });
   } catch (err) {
     traceAndroidUnlockAccountPerf('get_all_visible_accounts_error', {
       elapsedMs: Date.now() - startedAt,

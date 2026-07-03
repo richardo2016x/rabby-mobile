@@ -17,6 +17,8 @@ import {
   purchaseErrorListener,
   purchaseUpdatedListener,
 } from 'react-native-iap';
+import { startStartupTraceSpan, traceStartup } from '@/core/utils/startupTrace';
+import { runAfterHomePostStartupReady } from '@/core/utils/homeStartupReady';
 
 const handlePurchase = async (purchase: Purchase) => {
   devLog('purchaseUpdatedListener -> 1', purchase);
@@ -53,6 +55,7 @@ const handlePurchase = async (purchase: Purchase) => {
 
 export const useIAPListener = () => {
   useEffect(() => {
+    const effectEndTrace = startStartupTraceSpan('iap_listener_effect');
     let purchaseUpdateSubscription: ReturnType<
       typeof purchaseErrorListener
     > | null;
@@ -61,15 +64,22 @@ export const useIAPListener = () => {
     > | null;
 
     const init = async () => {
+      const initEndTrace = startStartupTraceSpan('iap_listener_init');
       try {
+        traceStartup('iap_listener_init_connection_start');
         await initConnection();
+        traceStartup('iap_listener_init_connection_end');
+        traceStartup('iap_listener_get_products_start');
         getProducts({
           skus: gasAccountProducts.map(item => item.id),
         });
+        traceStartup('iap_listener_get_products_end');
 
         devLog('init IAP listener');
         if (Platform.OS === 'android') {
+          traceStartup('iap_listener_flush_failed_purchases_start');
           flushFailedPurchasesCachedAsPendingAndroid();
+          traceStartup('iap_listener_flush_failed_purchases_end');
         }
         purchaseUpdateSubscription = purchaseUpdatedListener(handlePurchase);
 
@@ -80,15 +90,24 @@ export const useIAPListener = () => {
             devLog('purchaseErrorListener', error);
           },
         );
+        initEndTrace('end');
       } catch (error: any) {
+        initEndTrace('error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
         devLog('initConnection error', error);
         Sentry.captureException(error);
       }
     };
 
-    init();
+    const cancelInit = runAfterHomePostStartupReady(init, {
+      label: 'iap_listener_init',
+      fallbackMs: 5000,
+    });
+    effectEndTrace('scheduled');
 
     return () => {
+      cancelInit();
       purchaseUpdateSubscription?.remove();
       purchaseUpdateSubscription = null;
       purchaseErrorSubscription?.remove();

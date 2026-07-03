@@ -14,7 +14,6 @@ import {
   marketKeyToProtocolId,
 } from '@/screens/Lending/config/protocol';
 import { SvgProps } from 'react-native-svg';
-import { switchPerpsAccountBeforeNavigate } from '@/hooks/perps/usePerpsStore';
 import { useSelectedMarket } from '@/screens/Lending/hooks';
 import { clearLendingActionPopupState } from '@/screens/Lending/utils/actionPopup';
 import { IProtocolPortfolio } from '@/store/protocols';
@@ -48,7 +47,7 @@ interface ProtocolConfigItemType {
 export const useProtocolConfig = () => {
   const { navigation } = useSafeSetNavigationOptions();
   const { switchSceneCurrentAccount } = useSwitchSceneCurrentAccount();
-  const { accounts } = useMyAccounts();
+  const { accounts } = useMyAccounts({ disableAutoFetch: true });
   const { setMarketKey } = useSelectedMarket();
 
   const generateAAVEConfig = useCallback(
@@ -141,6 +140,9 @@ export const useProtocolConfig = () => {
           const isNavigateDetail =
             !!item?._originPortfolio?.detail?.position_token?.name;
 
+          const { switchPerpsAccountBeforeNavigate } = await import(
+            '@/hooks/perps/usePerpsStore'
+          );
           switchPerpsAccountBeforeNavigate(account);
           if (isNavigateDetail) {
             matomoRequestEvent({

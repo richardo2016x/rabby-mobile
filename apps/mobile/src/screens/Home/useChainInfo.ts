@@ -6,13 +6,13 @@ import { resolveValFromUpdater, UpdaterOrPartials } from '@/core/utils/store';
 import { assetsMapStore, computeAssetsApis } from './hooks/store';
 import tokenStore, { ITokenItem } from '@/store/tokens';
 import { debounce, isEqual } from 'lodash';
-import { getTop10MyAccounts } from '@/core/apis/account';
 import { useCreationWithShallowCompare } from '@/hooks/common/useMemozied';
 import { ChainListItem } from '@/components2024/SelectChainWithDistribute';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { IProtocolItem } from '@/store/protocols';
 import useProtocolListStore from '@/store/protocols';
+import { callHomeStartupService } from '@/core/services/homeStartupDeferredClient';
 
 type ChainAssetsUnit = Record<string, BigNumber>;
 interface BaseInfo {
@@ -56,7 +56,7 @@ const debounceComputeChainList = debounce<
     | typeof useProtocolListStore.subscribe
   >[0]
 >(async () => {
-  const { top10Addresses } = await getTop10MyAccounts();
+  const top10Addresses = await callHomeStartupService('getTop10Addresses', []);
 
   setFinalInfo(computeChainsListV2(top10Addresses));
 }, 100);

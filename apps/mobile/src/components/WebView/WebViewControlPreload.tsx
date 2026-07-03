@@ -9,6 +9,7 @@ import DappWebViewControl from './DappWebViewControl';
 import { SELF_CHECK_RPC_METHOD } from '@/constant/rpc';
 import { makeDebugBorder } from '@/utils/styles';
 import { BLANK_RABBY_PAGE } from './hooks';
+import { traceStartupOnce } from '@/core/utils/startupTrace';
 
 const isAndroid = Platform.OS === 'android';
 
@@ -65,6 +66,10 @@ export default function WebViewControlPreload() {
 
   const { entryScriptWeb3Loaded, entryScripts } =
     useJavaScriptBeforeContentLoaded();
+  traceStartupOnce('webview_control_preload_render', {
+    firstTouched,
+    entryScriptWeb3Loaded,
+  });
 
   // devLog(
   //   '[debug] entryScriptWeb3Loaded, firstTouched',
@@ -92,6 +97,8 @@ export default function WebViewControlPreload() {
   if (firstTouched) return null;
 
   if (!entryScriptWeb3Loaded) return null;
+
+  traceStartupOnce('webview_control_preload_render_webview');
 
   return (
     <DappWebViewControl

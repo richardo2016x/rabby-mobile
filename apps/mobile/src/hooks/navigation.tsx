@@ -26,8 +26,6 @@ import {
 import type { RootStackParamsList } from '@/navigation-type';
 import { setIOSScreenCapture } from './native/security';
 import RNScreenshotPrevent from '@/core/native/RNScreenshotPrevent';
-import * as apisLock from '@/core/apis/lock';
-import * as apisAccount from '@/core/apis/account';
 import { IS_IOS } from '@/core/native/utils';
 import {
   atSensitiveSceneState,
@@ -49,30 +47,30 @@ import { RefLikeObject } from '@/utils/type';
 import { perfEvents } from '@/core/utils/perf';
 import { useShallow } from 'zustand/react/shallow';
 import { CollapsibleRef } from 'react-native-collapsible-tab-view';
-import { autoLockEvent } from '@/core/apis/autoLock';
 import { notificationEvents } from '@/core/notifications/data';
 import {
   prepareTxHistoryDisplayUIData,
   txResultToToHistoryDisplayItem,
 } from '@/utils/transaction';
 // import { SampleNotifiedTxResult } from '@/core/notifications/sample-data';
-import {
-  keyringService,
-  preferenceService,
-  transactionHistoryService,
-} from '@/core/services';
-import { browserApis } from './browser/useBrowser';
-import { notificationOpenapi } from '@/core/notifications/openapi';
+import { keyringService } from '@/core/services/keyringRuntime';
 import { toast, toastLoading } from '@/components2024/Toast';
 import i18next from 'i18next';
-import { switchSceneCurrentAccount } from './accountsSwitcher';
-import { findMyAccountByOwnerAddress } from '@/core/notifications/utils';
 import { makeMutable, runOnJS } from 'react-native-reanimated';
 import PQueue from 'p-queue';
+import { waitAutoLockService } from '@/core/services/autoLockDeferredClient';
 
 type NavigationInstance =
   | NativeStackScreenProps<RootStackParamsList>['navigation']
   | NavigationContainerRef<RootStackParamsList>;
+
+function loadApisLock() {
+  return import('@/core/apis/lock');
+}
+
+function loadApisAccount() {
+  return import('@/core/apis/account');
+}
 
 type NavigationRouteStore = {
   currentRouteName: AppRootName | string | undefined;
@@ -98,16 +96,33 @@ perfEvents.addListener('EVENT_ROUTE_CHANGE', ({ currentRouteName }) => {
   setCurrentRouteName(currentRouteName as AppRootName | string | undefined);
 });
 
-autoLockEvent.addListener('timeout', ctx => {
-  const routeName = navigationRouteStore.getState().currentRouteName;
-
-  const atUnlock = routeName === RootNames.Unlock;
-  if (atUnlock) {
-    ctx.delayLock();
-  } else {
-    requestExpireUnlockSessionAndBackToUnlockScreen();
+let hasStartedNavigationAutoLockTimeoutListener = false;
+export function startNavigationAutoLockTimeoutListener() {
+  if (hasStartedNavigationAutoLockTimeoutListener) {
+    return;
   }
-});
+
+  hasStartedNavigationAutoLockTimeoutListener = true;
+  waitAutoLockService({
+    timeoutMs: 5000,
+  })
+    .then(autoLockService => {
+      autoLockService.subscribeTimeout(ctx => {
+        const routeName = navigationRouteStore.getState().currentRouteName;
+
+        const atUnlock = routeName === RootNames.Unlock;
+        if (atUnlock) {
+          ctx.delayLock();
+        } else {
+          requestExpireUnlockSessionAndBackToUnlockScreen();
+        }
+      });
+    })
+    .catch(error => {
+      hasStartedNavigationAutoLockTimeoutListener = false;
+      console.error('startNavigationAutoLockTimeoutListener::error', error);
+    });
+}
 
 export function useCurrentRouteName() {
   return {
@@ -468,6 +483,7 @@ export const resetNavigationOnTopOfHome: typeof naviReplace = (
 };
 
 export const requestLockWallet = makeAvoidParallelAsyncFunc(async () => {
+  const apisLock = await loadApisLock();
   const lockInfo = await apisLock.getRabbyLockInfo();
   const result = { canLockWallet: false };
   if (!lockInfo.isUseCustomPwd) return result;
@@ -483,6 +499,7 @@ export const requestLockWallet = makeAvoidParallelAsyncFunc(async () => {
 
 export const requestLockWalletAndBackToUnlockScreen =
   makeAvoidParallelAsyncFunc(async () => {
+    const apisLock = await loadApisLock();
     const lockInfo = await apisLock.getRabbyLockInfo();
     const result = { canLockWallet: false };
     if (!lockInfo.isUseCustomPwd) return result;
@@ -504,6 +521,7 @@ export const requestLockWalletAndBackToUnlockScreen =
 
 export const requestExpireUnlockSessionAndBackToUnlockScreen =
   makeAvoidParallelAsyncFunc(async () => {
+    const apisLock = await loadApisLock();
     const lockInfo = await apisLock.getRabbyLockInfo();
     const result = { canLockWallet: false };
     if (!lockInfo.isUseCustomPwd) return result;
@@ -530,6 +548,7 @@ export const requestLockWalletAndBackToHomeScreen = makeAvoidParallelAsyncFunc(
     console.debug('will back to home screen');
     const navigation = getReadyNavigationInstance();
     if (navigation) {
+      const apisAccount = await loadApisAccount();
       const hasAccountsInKeyring = await apisAccount.hasVisibleAccounts();
       resetNavigationTo(
         navigation,
@@ -873,8 +892,10 @@ export function startSubscribeRemoteNotification() {
 
   const notificationProcessQueue = new PQueue({ concurrency: 1 });
 
-  const canOpenNotificationTransaction = () =>
-    apisLock.isUnlocked() || apisLock.isUnlockSessionValid();
+  const canOpenNotificationTransaction = async () => {
+    const apisLock = await loadApisLock();
+    return apisLock.isUnlocked() || apisLock.isUnlockSessionValid();
+  };
 
   notificationEvents.subscribe(
     'onParsedReceivedData',
@@ -899,6 +920,9 @@ export function startSubscribeRemoteNotification() {
           return earlyReturnL1();
         }
 
+        const { notificationOpenapi } = await import(
+          '@/core/notifications/openapi'
+        );
         const txDetailPromise = notificationOpenapi
           .getUserTxDetail({
             chainId: parsedData.txInfo?.chainServerId || '',
@@ -916,6 +940,9 @@ export function startSubscribeRemoteNotification() {
         const openNotificationTransaction = async (ctx?: {
           defaultAction?: () => void;
         }) => {
+          const { findMyAccountByOwnerAddress } = await import(
+            '@/core/notifications/utils'
+          );
           const foundAccount = await findMyAccountByOwnerAddress(ownerAddress);
           const hideToastRef = {
             current: toastLoading(
@@ -959,6 +986,9 @@ export function startSubscribeRemoteNotification() {
             const needReplace = currentRouteName === RootNames.History;
             const naviFn = needReplace ? naviReplace : naviPush;
 
+            const { switchSceneCurrentAccount } = await import(
+              './accountsSwitcher'
+            );
             await switchSceneCurrentAccount('History', foundAccount);
             hideToastRef.current();
             naviFn(RootNames.StackTransaction, {
@@ -973,6 +1003,9 @@ export function startSubscribeRemoteNotification() {
 
           hideToastRef.current();
 
+          const { preferenceService, transactionHistoryService } = await import(
+            '@/core/services'
+          );
           const pinedQueue = preferenceService.getPinToken();
           const customTxItemsMap =
             transactionHistoryService.getCustomTxItemMap();
@@ -1014,7 +1047,7 @@ export function startSubscribeRemoteNotification() {
           perfEvents.emit('GLOBAL_CLEAR_ALL_COVERED_COMPONENTS');
         };
 
-        if (canOpenNotificationTransaction()) {
+        if (await canOpenNotificationTransaction()) {
           await openNotificationTransaction();
           return earlyReturnL1();
         }

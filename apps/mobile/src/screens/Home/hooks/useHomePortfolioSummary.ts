@@ -1,5 +1,4 @@
 import { zCreate } from '@/core/utils/reexports';
-import { filterMyAccounts } from '@/core/apis/account';
 import accountStore from '@/store/account';
 import addressBalanceStore, { balanceAccountsStore } from '@/store/balance';
 import {
@@ -11,6 +10,16 @@ import {
 import { makeDefaultSelectData } from '@/store/curveShared';
 import { sceneCurve24hStore } from '@/store/curve24h';
 import { useShallow } from 'zustand/react/shallow';
+import { KEYRING_CLASS } from '@rabby-wallet/keyring-utils';
+
+function filterMyAccounts<T extends { type: string }>(accounts: T[]) {
+  return accounts.filter(
+    account =>
+      account.type !== KEYRING_CLASS.WATCH &&
+      account.type !== KEYRING_CLASS.GNOSIS &&
+      account.type !== KEYRING_CLASS.WALLETCONNECT,
+  );
+}
 
 type HomeChangeData = Pick<
   Combined24hBalanceData,

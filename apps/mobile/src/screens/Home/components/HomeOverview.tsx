@@ -1,4 +1,3 @@
-import { apisPerps } from '@/core/apis';
 import RcIconDoubleArrowCC from '@/assets2024/icons/common/double-arrow-cc.svg';
 import RcIconApprovalsCC from '@/assets2024/icons/home/IconApprovalsCC.svg';
 import RcIconBridgeCC from '@/assets2024/icons/home/IconBridgeCC.svg';
@@ -26,6 +25,7 @@ import { StackActions, useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Dimensions,
+  InteractionManager,
   ScrollView,
   StyleSheet,
   useWindowDimensions,
@@ -49,7 +49,6 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { MultiHomeFeatTitle } from '@/constant/newStyle';
-import { currencyService } from '@/core/services';
 import { useMyAccounts } from '@/hooks/account';
 import { storeApiAccountsSwitcher } from '@/hooks/accountsSwitcher';
 import { apisHomeTabIndex, useRabbyAppNavigation } from '@/hooks/navigation';
@@ -79,8 +78,8 @@ import {
   useHomePostStartupReady,
   useHomeStartupReady,
 } from '@/core/utils/homeStartupReady';
+import { traceStartup } from '@/core/utils/startupTrace';
 import { syncTop10History } from '@/databases/hooks/history';
-import { useSubscribePosition } from '@/hooks/perps/usePerpsStore';
 import { useFetchCexInfo } from '@/hooks/useAddrDesc';
 import {
   checkGasAccountAddressesEligibility,
@@ -88,8 +87,6 @@ import {
 } from '@/hooks/useGasAccountEligibility';
 import { refreshDayCurve } from '@/store/curve24h';
 import { scene24hBalanceStore } from '@/store/balance24h';
-import { deleteLongTimeCurveCache } from '@/utils/24balanceCurveCache';
-import { deleteLongTime24hBalanceCache } from '@/utils/24hBalanceCache';
 import useTokenList from '@/store/tokens';
 import useProtocol from '@/store/protocols';
 import { colord } from 'colord';
@@ -98,11 +95,9 @@ import { BrowserOrPerpsPosition } from './BrowserOrPerpsPosition';
 import { GasAccountBadge } from '../../GasAccount/components/GasAccountBadge';
 import { apisLending } from '../../Lending/hooks';
 import { HomeCenterArea } from '../components/HomeCenterArea';
-import { HomeDappDrawer } from '../components/HomeDappDrawer';
 import { HomePendingBadge } from '../components/HomePending';
 import { LendingHF } from '../components/LendingHF';
 import { MultiAddressHomeHeader } from '../components/MultiAddressHomeHeader';
-import { PerpsPnl } from '../components/PerpsPnl';
 import { PointsBadge } from '../../Points/components/PointsBadge';
 import {
   refreshSuccessAndFailList,
@@ -144,8 +139,8 @@ import { useDismissConvertDustBanner } from '../hooks/useConvertDustBanner';
 import { useMemoizedFn } from 'ahooks';
 import { useValueFromSharedValue } from '@/hooks/reanimated';
 import { sleep } from '@/utils/async';
-import { getTop10MyAccounts } from '@/core/apis/account';
 import { isEqual } from 'lodash';
+import { callHomeStartupService } from '@/core/services/homeStartupDeferredClient';
 import {
   isOverPulldownRefreshThreshold,
   OnRefreshOnJs,
@@ -641,6 +636,74 @@ type HomeOverviewTriggerUpdate = ReturnType<
   typeof addressBalanceStore.useAccountsBalanceTrigger
 >['triggerUpdate'];
 
+const HOME_BACKGROUND_BADGE_DELAY_MS = 6000;
+
+const LazyHomeOverviewPerpsSubscription = React.lazy(() =>
+  import('./HomeOverviewPerpsSubscription').then(m => ({
+    default: m.HomeOverviewPerpsSubscription,
+  })),
+);
+const LazyHomeDappDrawer = React.lazy(() =>
+  import('../components/HomeDappDrawer').then(m => ({
+    default: m.HomeDappDrawer,
+  })),
+);
+
+const LazyPerpsPnl = React.lazy(() =>
+  import('../components/PerpsPnl').then(m => ({
+    default: m.PerpsPnl,
+  })),
+);
+
+function useHomeBackgroundDelayReady({
+  enabled,
+  label,
+  delayMs = HOME_BACKGROUND_BADGE_DELAY_MS,
+}: {
+  enabled: boolean;
+  label: string;
+  delayMs?: number;
+}) {
+  const [ready, setReady] = React.useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
+    traceStartup('home_background_delay_schedule', {
+      label,
+      delayMs,
+    });
+
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        if (disposed) {
+          return;
+        }
+
+        traceStartup('home_background_delay_ready', {
+          label,
+          delayMs,
+        });
+        setReady(true);
+      }, delayMs);
+    });
+
+    return () => {
+      disposed = true;
+      interactionHandle.cancel?.();
+      timer && clearTimeout(timer);
+    };
+  }, [delayMs, enabled, label]);
+
+  return ready;
+}
+
 function HomeOverviewDeferredStartupGate({
   triggerUpdate,
 }: {
@@ -704,7 +767,6 @@ function HomeOverviewPostStartupEffects({
   const sortedAccounts = useSortAddressList(accounts);
   const isFirstTriggerRef = useRef(true);
 
-  useSubscribePosition(sortedAccounts);
   useFetchCexInfo();
 
   useFocusEffect(
@@ -718,8 +780,9 @@ function HomeOverviewPostStartupEffects({
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      deleteLongTimeCurveCache();
-      deleteLongTime24hBalanceCache();
+      callHomeStartupService('deleteLongTimeHomeCache', []).catch(error => {
+        console.error('deleteLongTimeHomeCache error', error);
+      });
     }, 0);
 
     return () => clearTimeout(timeoutId);
@@ -763,19 +826,42 @@ function HomeOverviewPostStartupEffects({
       triggerApprovalAlertCounts(HOME_REFRESH_INTERVAL);
       // // leave here to measure perf impact
       // isNonPublicProductionEnv && apisLending.fetchLendingData({ persistOnly: true });
-      getTop10MyAccounts().then(({ top10Addresses }) => {
+      callHomeStartupService('getTop10Addresses', []).then(top10Addresses => {
         syncTop10History(top10Addresses, false);
       });
     }, [triggerUpdate]),
   );
 
-  return null;
+  return (
+    <DeferredHomeOverviewPerpsSubscription sortedAccounts={sortedAccounts} />
+  );
+}
+
+function DeferredHomeOverviewPerpsSubscription({
+  sortedAccounts,
+}: {
+  sortedAccounts: ReturnType<typeof useSortAddressList>;
+}) {
+  const ready = useHomeBackgroundDelayReady({
+    enabled: true,
+    label: 'home_perps_subscription',
+  });
+
+  if (!ready) {
+    return null;
+  }
+
+  return (
+    <React.Suspense fallback={null}>
+      <LazyHomeOverviewPerpsSubscription sortedAccounts={sortedAccounts} />
+    </React.Suspense>
+  );
 }
 
 function DeferredHomeDappDrawer({
   onScrollBack,
 }: {
-  onScrollBack: React.ComponentProps<typeof HomeDappDrawer>['onScrollBack'];
+  onScrollBack?: WorkletFunction;
 }) {
   const postStartupReady = useHomePostStartupReady();
   const isPostUnlockLockedSession = useIsPostUnlockLockedSession();
@@ -784,7 +870,11 @@ function DeferredHomeDappDrawer({
     return null;
   }
 
-  return <HomeDappDrawer onScrollBack={onScrollBack} />;
+  return (
+    <React.Suspense fallback={null}>
+      <LazyHomeDappDrawer onScrollBack={onScrollBack} />
+    </React.Suspense>
+  );
 }
 
 function DeferredHomeMenuBadge({
@@ -802,13 +892,28 @@ function DeferredHomeMenuBadge({
   badgeStyle: React.ComponentProps<typeof BadgeText>['style'];
 }) {
   const startupReady = useHomePostStartupReady();
+  const shouldDelayBadge =
+    el.key === MultiHomeFeatTitle.Perps ||
+    el.key === MultiHomeFeatTitle.Lending;
+  const delayedBadgeReady = useHomeBackgroundDelayReady({
+    enabled: startupReady && shouldDelayBadge,
+    label: `home_menu_badge_${el.key}`,
+  });
 
   if (!startupReady) {
     return null;
   }
 
   if (el.key === MultiHomeFeatTitle.Perps) {
-    return <PerpsPnl />;
+    if (!delayedBadgeReady) {
+      return null;
+    }
+
+    return (
+      <React.Suspense fallback={null}>
+        <LazyPerpsPnl />
+      </React.Suspense>
+    );
   }
 
   if (el.key === MultiHomeFeatTitle.History) {
@@ -820,6 +925,10 @@ function DeferredHomeMenuBadge({
   }
 
   if (el.key === MultiHomeFeatTitle.Lending) {
+    if (!delayedBadgeReady) {
+      return null;
+    }
+
     return <LendingHF />;
   }
 
@@ -992,9 +1101,14 @@ export const HomeOverview = React.memo(() => {
     forceUpdateApprovalAlertCounts();
     apisLending.fetchLendingData();
     const forceRefresh = true;
-    const { top10Addresses } = await getTop10MyAccounts();
+    const top10Addresses = await callHomeStartupService(
+      'getTop10Addresses',
+      [],
+    );
     syncTop10History(top10Addresses, forceRefresh);
-    currencyService.syncCurrencyList(forceRefresh);
+    callHomeStartupService('syncCurrencyList', [forceRefresh]).catch(error => {
+      console.error('syncCurrencyList error', error);
+    });
 
     // refresh token/protocol list
     useTokenList.getState().batchGetTokenList(top10Addresses, forceRefresh);
@@ -1125,7 +1239,13 @@ export const HomeOverview = React.memo(() => {
         case MultiHomeFeatTitle.Ecosystem:
           break;
         case MultiHomeFeatTitle.Perps:
-          apisPerps.setHasShownPerpsGuidePopup(true);
+          void import('@/core/apis/perps')
+            .then(({ apisPerps }) => {
+              apisPerps.setHasShownPerpsGuidePopup(true);
+            })
+            .catch(error => {
+              console.error('setHasShownPerpsGuidePopup::error', error);
+            });
           navigation.push(RootNames.StackTransaction, {
             screen: RootNames.Perps,
             params: {},

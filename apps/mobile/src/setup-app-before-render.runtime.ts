@@ -7,7 +7,6 @@ import { InteractionManager } from 'react-native';
 import { runIIFEFunc } from './core/utils/store';
 import { startSubscribeLangChange } from './hooks/lang';
 import { connectPushServerOnBootstrap } from './core/notifications';
-import { startRestoreWalletConnectSessions } from './core/walletconnect/client';
 
 import { startManageAccountStoreLifecycle } from './hooks/account';
 
@@ -16,7 +15,6 @@ import {
   startSubscribeAppStateChange,
 } from './hooks/useLock';
 import { startSyncDefaultRPCs } from './hooks/defaultRPCs';
-import { startSubscribePerpsOnAppState } from './hooks/perps/usePerpsStore';
 import { storeApiGasAccount } from './screens/GasAccount/hooks/atom';
 import { startSubscribeOnekeyDevices } from './core/apis/onekey';
 import { startSubscribeTrezorConnectOnUrl } from './hooks/trezor/useTrezor';
@@ -44,33 +42,31 @@ import { rateModalStartSyncNetworth } from './components/RateModal/hooks';
 import { trimNoLongerSupportsOnUnlock } from './components2024/NoLongerSupports/useNoLongerSupports';
 import { startCheckClearAction } from './utils/clipboard';
 import { startSubscribeOpenApiHttpErrorDebugToast } from './utils/openapiDebugToast';
-import tokenListStore from './store/tokens';
 import {
-  balance24hStore,
   hydrateCachedHome24hBalanceScene,
   scene24hBalanceStore,
 } from './store/balance24h';
-import {
-  hydrateCachedHomeDayCurve,
-  initCurve24hStore,
-  startProcessMultiCurveEvents,
-} from './store/curve24h';
-import useProtocolListStore from './store/protocols';
-import { useAppChainStore } from './store/appchain';
-import addressBalanceStore from './store/balance';
-import {
-  ensureAccountBalanceSelectionLifecycle,
-  startProcessAccountBalanceEvents,
-} from './store/balanceAccountSelection';
+import { startProcessMultiCurveEvents } from './store/curve24h';
+import { startProcessAccountBalanceEvents } from './store/balanceAccountSelection';
 import * as apisAutoLock from './core/apis/autoLock';
-import { isUnlockSessionValid } from './core/apis/lock';
 import { startWatchLayoutChange } from './hooks/useAppLayout';
 import { startCareAppNotificationPermissions } from './hooks/appNotification';
-import nftListStore from './store/nfts';
-import { keyringService } from './core/services';
+import {
+  keyringService,
+  startServiceMaintenanceAfterStartup,
+} from './core/services';
+import { startStartupTraceSpan, traceStartup } from './core/utils/startupTrace';
+import {
+  startInitPersistedStores,
+  startReadableAccountBootstrapWarmups,
+} from './setup-readable-account-bootstrap-warmups';
 
 const UNLOCKED_STORES_AFTER_UNLOCK_DELAY_MS = 800;
+const PERPS_RUNTIME_STARTUP_DELAY_MS = 6000;
 
+traceStartup('setup_runtime_module_evaluated');
+
+startServiceMaintenanceAfterStartup();
 startComputationThread();
 startSubscribeLangChange();
 
@@ -96,7 +92,7 @@ startSyncDefaultRPCs();
 runIIFEFunc(() => {
   storeApiGasAccount.fetchGasAccountInfo();
 });
-startSubscribePerpsOnAppState();
+startPerpsRuntimeAfterStartup();
 startWatchLayoutChange();
 
 startSubscribeUserDidTakeScreenshot();
@@ -123,53 +119,11 @@ startSubscribeOpenApiHttpErrorDebugToast();
 startCareAppNotificationPermissions();
 startSubscribeRemoteNotification();
 
-async function initPersistedStores() {
-  console.time('initPersistedStores');
-  await useAppChainStore.getState().initStore();
-  await Promise.all([
-    addressBalanceStore.initStore(),
-    balance24hStore.initStore(),
-    initCurve24hStore(),
-  ]);
-  hydrateCachedHome24hBalanceScene();
-  hydrateCachedHomeDayCurve();
-  console.timeEnd('initPersistedStores');
-}
-
 export async function initReadableAccountStores() {
-  console.time('initReadableAccountStores');
-  await tokenListStore.getState().initStore();
-  await nftListStore.getState().initStore();
-  await useProtocolListStore.getState().initStore();
-  console.timeEnd('initReadableAccountStores');
-}
-
-const initPersistedStoresStateRef = {
-  promise: null as Promise<void> | null,
-};
-export const startInitPersistedStores = async () => {
-  if (initPersistedStoresStateRef.promise) {
-    return initPersistedStoresStateRef.promise;
-  }
-  const promise = initPersistedStores();
-  initPersistedStoresStateRef.promise = promise;
-  await promise;
-};
-
-export async function startReadableAccountBootstrapWarmups() {
-  const results = await Promise.allSettled([
-    startInitPersistedStores(),
-    ensureAccountBalanceSelectionLifecycle(),
-  ]);
-
-  results.forEach(result => {
-    if (result.status === 'rejected') {
-      console.error(
-        'startReadableAccountBootstrapWarmups::error',
-        result.reason,
-      );
-    }
-  });
+  const { startInitReadableAccountStores } = await import(
+    './setup-readable-account-stores'
+  );
+  await startInitReadableAccountStores();
 }
 
 export async function startUnlockScreenBootstrapWarmups() {
@@ -180,12 +134,57 @@ const startInitStores = async () => {
   await startInitPersistedStores();
 };
 
+function startPerpsRuntimeAfterStartup() {
+  const reason = 'setup_runtime_after_startup';
+  traceStartup('perps_runtime_schedule', {
+    reason,
+    delayMs: PERPS_RUNTIME_STARTUP_DELAY_MS,
+  });
+
+  InteractionManager.runAfterInteractions(() => {
+    setTimeout(() => {
+      const endTrace = startStartupTraceSpan('perps_runtime_import', {
+        reason,
+      });
+
+      import('./hooks/perps/usePerpsStore')
+        .then(runtime => {
+          runtime.startSubscribePerpsOnAppState();
+          runtime.startPerpsStartupWarmups({
+            reason,
+          });
+          endTrace('end');
+        })
+        .catch(error => {
+          endTrace('error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          console.error('startPerpsRuntimeAfterStartup::error', error);
+        });
+    }, PERPS_RUNTIME_STARTUP_DELAY_MS);
+  });
+}
+
 function startInitStoresAfterUnlockInteractions(reason: string) {
+  traceStartup('init_stores_after_unlock_schedule', {
+    reason,
+    delayMs: UNLOCKED_STORES_AFTER_UNLOCK_DELAY_MS,
+  });
   const interactionHandle = InteractionManager.runAfterInteractions(() => {
     setTimeout(() => {
-      startInitStores().catch(error => {
-        console.error(`startInitStoresOnUnlock::${reason}::error`, error);
+      const endTrace = startStartupTraceSpan('init_stores_after_unlock_run', {
+        reason,
       });
+      startInitStores()
+        .then(() => {
+          endTrace('end');
+        })
+        .catch(error => {
+          endTrace('error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          console.error(`startInitStoresOnUnlock::${reason}::error`, error);
+        });
     }, UNLOCKED_STORES_AFTER_UNLOCK_DELAY_MS);
   });
 
@@ -204,13 +203,3 @@ function startInitStoresOnUnlock() {
 }
 
 startInitStoresOnUnlock();
-
-function startWalletConnectStartupPolicy() {
-  if (keyringService.isUnlocked() || isUnlockSessionValid()) {
-    startRestoreWalletConnectSessions();
-  }
-
-  keyringService.on('unlock', startRestoreWalletConnectSessions);
-}
-
-startWalletConnectStartupPolicy();

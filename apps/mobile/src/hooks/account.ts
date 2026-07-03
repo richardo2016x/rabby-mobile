@@ -21,6 +21,7 @@ import * as apiMnemonic from '@/core/apis/mnemonic';
 import { resolveValFromUpdater, UpdaterOrPartials } from '@/core/utils/store';
 import addressBalanceStore from '@/store/balance';
 import accountStore, {
+  FetchAccountsOptions,
   NEWLY_ADDED_ACCOUNT_DURATION,
   useAccountStore,
 } from '@/store/account';
@@ -236,16 +237,20 @@ export function setCurrentAccount(
   accountStore.setCurrentAccount(valOrFunc);
 }
 
-export function useAccounts(opts?: { disableAutoFetch?: boolean }) {
+export function useAccounts(opts?: {
+  disableAutoFetch?: boolean;
+  fetchSource?: string;
+}) {
   const accounts = useAccountStore(s => s.accounts);
 
-  const { disableAutoFetch = false } = opts || {};
+  const { disableAutoFetch = false, fetchSource = 'useAccounts.autoFetch' } =
+    opts || {};
 
   useEffect(() => {
     if (!disableAutoFetch) {
-      accountStore.fetchAccounts();
+      accountStore.fetchAccounts({ source: fetchSource });
     }
-  }, [disableAutoFetch]);
+  }, [disableAutoFetch, fetchSource]);
 
   const stableAccounts = useCreationWithShallowCompare(() => {
     return accounts;
@@ -264,20 +269,26 @@ export const storeApiAccounts = {
   getPinAddresses() {
     return accountStore.getState().pinnedAddresses;
   },
-  fetchAccounts: accountStore.fetchAccounts,
+  fetchAccounts: accountStore.fetchAccounts as (
+    options?: FetchAccountsOptions,
+  ) => ReturnType<typeof accountStore.fetchAccounts>,
   removeAccount: accountStore.removeAccount,
 };
 
-export function useMyAccounts(opts?: { disableAutoFetch?: boolean }) {
+export function useMyAccounts(opts?: {
+  disableAutoFetch?: boolean;
+  fetchSource?: string;
+}) {
   const allAccounts = useAccountStore(s => s.accounts);
 
-  const { disableAutoFetch = false } = opts || {};
+  const { disableAutoFetch = false, fetchSource = 'useMyAccounts.autoFetch' } =
+    opts || {};
 
   useEffect(() => {
     if (!disableAutoFetch) {
-      accountStore.fetchAccounts();
+      accountStore.fetchAccounts({ source: fetchSource });
     }
-  }, [disableAutoFetch]);
+  }, [disableAutoFetch, fetchSource]);
 
   const accounts = useCreationWithShallowCompare(() => {
     return filterMyAccounts(allAccounts);

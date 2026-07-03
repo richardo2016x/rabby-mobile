@@ -1,10 +1,6 @@
 import { debounce } from 'lodash';
 
-import { getTop10MyAccounts } from '@/core/apis/account';
-import { transactionHistoryService } from '@/core/services';
 import { makeAvoidParallelAsyncFunc } from '@/core/utils/concurrency';
-import { HistoryItemEntity } from '@/databases/entities/historyItem';
-import { onAppOrmSyncEvents } from '@/databases/sync/_event';
 import { zCreate } from '@/core/utils/reexports';
 import {
   resolveValFromUpdater,
@@ -13,6 +9,7 @@ import {
 } from '@/core/utils/store';
 import { RefLikeObject } from '@/utils/type';
 import { balanceAccountsStore } from '@/store/balance';
+import { callHomeStartupService } from '@/core/services/homeStartupDeferredClient';
 
 type HomeHistoryState = {
   pendingTxCount: number;
@@ -63,32 +60,14 @@ function setHistoryCount(
 
 export const refreshSuccessAndFailList = makeAvoidParallelAsyncFunc(
   async () => {
-    const { top10Addresses } = await getTop10MyAccounts();
-    if (!top10Addresses.length) return;
-    const timestamp = transactionHistoryService.getClearSuccessAndFailListTs();
-    const list = await HistoryItemEntity.getUnreadHistoryCount(
-      top10Addresses,
-      timestamp / 1000,
+    const nextCount = await callHomeStartupService(
+      'refreshHomeSuccessAndFailList',
+      [],
     );
-    list.forEach(i => {
-      const status = i.status ?? 1;
-      const id = `${i.owner_addr.toLowerCase()}-${i.txHash}`;
-      if (status === 1) {
-        transactionHistoryService.setSucceedList(id);
-      } else {
-        transactionHistoryService.setFailedList(id);
-      }
-    });
-
-    const count = transactionHistoryService.getFailedCount();
-    const success = transactionHistoryService.getSucceedCount();
-
-    setHistoryCount({ success, fail: count });
-
-    return {
-      success: success,
-      fail: count,
-    };
+    if (nextCount) {
+      setHistoryCount(nextCount);
+    }
+    return nextCount;
   },
 );
 
@@ -112,8 +91,9 @@ export const resetFetchHistoryTxCount = makeAvoidParallelAsyncFunc(async () => {
   if (!addresses.length) {
     return;
   }
-  const { pendingsLength } =
-    transactionHistoryService.getPendingsAddresses(addresses);
+  const pendingsLength = await callHomeStartupService('getHomePendingTxCount', [
+    addresses,
+  ]);
   setPendingTxCount(pendingsLength);
   timeRef.current = pendingsLength
     ? setInterval(resetFetchHistoryTxCount, 5000)
@@ -123,17 +103,10 @@ export const resetFetchHistoryTxCount = makeAvoidParallelAsyncFunc(async () => {
 const thorttleGetSuccessAndFailList = debounce(refreshSuccessAndFailList, 1000);
 
 runIIFEFunc(() => {
-  onAppOrmSyncEvents({
-    taskFor: ['all-history'],
-    onRemoteDataUpserted: ctx => {
-      switch (ctx.taskFor) {
-        case 'all-history':
-          thorttleGetSuccessAndFailList();
-          break;
-        default:
-          break;
-      }
-    },
+  callHomeStartupService('subscribeHomeHistoryUpserted', [
+    thorttleGetSuccessAndFailList,
+  ]).catch(error => {
+    console.error('subscribeHomeHistoryUpserted error', error);
   });
 
   resetFetchHistoryTxCount();

@@ -39,7 +39,7 @@ import {
   runIIFEFunc,
   UpdaterOrPartials,
 } from '@/core/utils/store';
-import { AppState } from 'react-native';
+import { AppState, InteractionManager } from 'react-native';
 import { useShallow } from 'zustand/react/shallow';
 import { perpsService } from '@/core/services';
 import {
@@ -48,9 +48,12 @@ import {
 } from '@rabby-wallet/rabby-api/dist/types';
 import { stats } from '@/utils/stats';
 import BigNumber from 'bignumber.js';
+import { startStartupTraceSpan, traceStartup } from '@/core/utils/startupTrace';
 
 let perpsTopTokenCache: PerpTopTokenV3[] = [];
 let perpsCategoryCache: PerpTopTokenCategory[] = [];
+
+traceStartup('perps_store_module_evaluated');
 
 // Per-dex raw snapshots, source of truth for rebuilding the aggregated
 // `currentClearinghouseState`. Stale frames (older `time`) never win.
@@ -1525,9 +1528,88 @@ export const usePerpsStore = () => {
   };
 };
 
-runIIFEFunc(fetchMarketData);
-runIIFEFunc(fetchFavoriteMarkets);
-runIIFEFunc(fetchMarginModeByCoin);
+function runPerpsStartupIIFE(label: string, task: () => Promise<unknown>) {
+  return runIIFEFunc(() => {
+    const endTrace = startStartupTraceSpan(label);
+
+    return task().then(
+      value => {
+        endTrace('end');
+        return value;
+      },
+      error => {
+        endTrace('error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      },
+    );
+  });
+}
+
+let perpsStartupWarmupsScheduled = false;
+let perpsStartupWarmupsPromise: Promise<void> | null = null;
+
+function runPerpsStartupWarmups(reason: string) {
+  if (perpsStartupWarmupsPromise) {
+    return perpsStartupWarmupsPromise;
+  }
+
+  const endTrace = startStartupTraceSpan('perps_startup_warmups', {
+    reason,
+  });
+  perpsStartupWarmupsPromise = Promise.all([
+    runPerpsStartupIIFE('perps_fetch_market_data_iife', fetchMarketData),
+    runPerpsStartupIIFE(
+      'perps_fetch_favorite_markets_iife',
+      fetchFavoriteMarkets,
+    ),
+    runPerpsStartupIIFE(
+      'perps_fetch_margin_mode_by_coin_iife',
+      fetchMarginModeByCoin,
+    ),
+  ]).then(
+    () => {
+      endTrace('end');
+    },
+    error => {
+      endTrace('error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      perpsStartupWarmupsPromise = null;
+      perpsStartupWarmupsScheduled = false;
+      throw error;
+    },
+  );
+
+  return perpsStartupWarmupsPromise;
+}
+
+export function startPerpsStartupWarmups({
+  reason = 'startup',
+  delayMs = 0,
+}: {
+  reason?: string;
+  delayMs?: number;
+} = {}) {
+  if (perpsStartupWarmupsScheduled || perpsStartupWarmupsPromise) {
+    return;
+  }
+
+  perpsStartupWarmupsScheduled = true;
+  traceStartup('perps_startup_warmups_schedule', {
+    reason,
+    delayMs,
+  });
+
+  InteractionManager.runAfterInteractions(() => {
+    setTimeout(() => {
+      runPerpsStartupWarmups(reason).catch(error => {
+        console.error('startPerpsStartupWarmups::error', error);
+      });
+    }, delayMs);
+  });
+}
 
 export function startSubscribePerpsOnAppState() {
   const sdk = apisPerps.getPerpsSDK();
@@ -1539,7 +1621,9 @@ export function startSubscribePerpsOnAppState() {
     if (nextAppState === 'active') {
       const { marketDataStatus, marketData } = perpsStore.getState();
       if (marketDataStatus === 'error' || marketData.length === 0) {
-        fetchMarketData();
+        startPerpsStartupWarmups({
+          reason: 'app_active_retry',
+        });
       }
     }
   });

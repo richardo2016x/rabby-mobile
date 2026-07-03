@@ -1,27 +1,33 @@
 /**
  * @format
  */
-import 'react-native-gesture-handler';
-import {
+require('react-native-gesture-handler');
+const {
   configureReanimatedLogger,
   ReanimatedLogLevel,
-} from 'react-native-reanimated';
-import { enableFreeze, enableScreens } from 'react-native-screens';
+} = require('react-native-reanimated');
+const { enableScreens } = require('react-native-screens');
 // enableFreeze();
 enableScreens(true);
 
-import { initSentry } from './src/core/sentry';
+const { initSentry } = require('./src/core/sentry');
 // Init Sentry before polyfills as it patches global Promise
 // @see https://docs.sentry.io/platforms/react-native/integrations/unhandled-rejections/#auto-patching-default-behavior
 if (!__DEV__) {
   initSentry();
 }
 
-import './src/utils/logging/install';
-import './global';
-import './src/setup-app';
-import './src/utils/walletUnlock';
-import { ENABLE_REACTOTRON } from './src/core/utils/reactotron-plugins/featureFlag';
+const {
+  startStartupHermesProfiler,
+} = require('./src/core/utils/startupHermesProfiler');
+startStartupHermesProfiler();
+require('./src/utils/logging/install');
+require('./global');
+require('./src/setup-app');
+require('./src/utils/walletUnlock');
+const {
+  ENABLE_REACTOTRON,
+} = require('./src/core/utils/reactotron-plugins/featureFlag');
 
 if (process.env.WITH_ROZENITE === 'true') {
   const {
@@ -34,12 +40,12 @@ if (__DEV__ && ENABLE_REACTOTRON) {
   import('./ReactotronConfig');
 }
 
-import { AppRegistry } from 'react-native';
-import App from './src/App';
-import '@/utils/i18n';
-import { name as appName } from './app.json';
+const { AppRegistry } = require('react-native');
+const App = require('./src/App').default;
+require('@/utils/i18n');
+const { name: appName } = require('./app.json');
 
-import './src/setup-app-before-render';
+require('./src/setup-app-before-render');
 
 // must be called synchoronously immediately
 AppRegistry.registerComponent(appName, () => App);

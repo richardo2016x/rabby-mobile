@@ -37,7 +37,7 @@ export async function preloadSingleAddressNavigator() {
 }
 
 export async function preloadHomeShortcutNavigators() {
-  await Promise.all([preloadSettingsScreen(), preloadSingleAddressNavigator()]);
+  return;
 }
 
 export const TESTKITS_PRELOAD_SCREENS: { [P in AppRootName]?: P } = {

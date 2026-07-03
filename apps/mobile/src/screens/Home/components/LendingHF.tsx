@@ -7,6 +7,10 @@ import { formatUsdValue } from '@/utils/number';
 import { createGetStyles2024 } from '@/utils/styles';
 import { useEffect } from 'react';
 import { Text } from '@/components/Typography';
+import { InteractionManager } from 'react-native';
+import { traceStartup } from '@/core/utils/startupTrace';
+
+const LENDING_HF_STARTUP_DELAY_MS = 6000;
 
 const NetWorthBadge: React.FC<{ netWorth: string }> = ({ netWorth }) => {
   const { styles } = useTheme2024({ getStyle: getStyles });
@@ -26,10 +30,21 @@ export const LendingHF: React.FC<{}> = () => {
     if (lendingHf) {
       return;
     }
-    const timer = setTimeout(() => {
-      apisLending.fetchLendingData();
-    }, 200);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    traceStartup('home_lending_hf_fetch_schedule', {
+      delayMs: LENDING_HF_STARTUP_DELAY_MS,
+    });
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        traceStartup('home_lending_hf_fetch_start');
+        apisLending
+          .fetchLendingData()
+          .finally(() => traceStartup('home_lending_hf_fetch_end'));
+      }, LENDING_HF_STARTUP_DELAY_MS);
+    });
+
     return () => {
+      interactionHandle.cancel?.();
       timer && clearTimeout(timer);
     };
   }, [lendingHf]);

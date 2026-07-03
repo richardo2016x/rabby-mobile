@@ -17,10 +17,12 @@ import { ChainWithBalance } from '@rabby-wallet/rabby-api/dist/types';
 import PQueue from 'p-queue';
 import { useCallback, useMemo, useRef } from 'react';
 import type { Account } from '@/types/account';
+import { IS_ANDROID } from '@/core/native/utils';
 import { perfEvents } from '@/core/utils/perf';
 import { zCreate, zMutative } from '@/core/utils/reexports';
 import { makeSWRKeyAsyncFunc } from '@/core/utils/concurrency';
 import { resolveValFromUpdater, UpdaterOrPartials } from '@/core/utils/store';
+import { logger } from '@/utils/logger';
 import {
   ResourceBaseStore,
   ResourceFlowState,
@@ -156,6 +158,17 @@ const buildBalanceTraceDetail = (
     endpoint: trace?.endpoint,
   };
 };
+
+function traceAndroidBalancePerf(
+  event: string,
+  data: Record<string, unknown> = {},
+) {
+  if (!IS_ANDROID) {
+    return;
+  }
+
+  logger.info(`[RabbyUnlockPerf:balance] ${event}`, data);
+}
 
 function normalizeBalanceAddresses(addresses: string[]) {
   return Array.from(new Set(addresses.map(address => address.toLowerCase())));
@@ -411,10 +424,17 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
   hydrateCachedBalancesForAccounts = async (
     accounts: Array<Pick<Account, 'address' | 'type'>>,
   ) => {
+    const startedAt = Date.now();
+
     if (!accounts.length) {
+      traceAndroidBalancePerf('hydrate_cached_balances_skip', {
+        elapsedMs: Date.now() - startedAt,
+        reason: 'no_accounts',
+      });
       return;
     }
 
+    const prepareStartedAt = Date.now();
     const lowerAddresses = Array.from(
       new Set(accounts.map(item => item.address.toLowerCase())),
     );
@@ -422,13 +442,32 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
     const hasAnyMissingBalance = lowerAddresses.some(
       address => !currentBalanceMap[address],
     );
+    traceAndroidBalancePerf('hydrate_cached_balances_prepare_end', {
+      elapsedMs: Date.now() - prepareStartedAt,
+      accountCount: accounts.length,
+      addressCount: lowerAddresses.length,
+      memoryValueCount: Object.keys(currentBalanceMap).length,
+      hasAnyMissingBalance,
+    });
 
     if (!hasAnyMissingBalance) {
+      traceAndroidBalancePerf('hydrate_cached_balances_skip', {
+        elapsedMs: Date.now() - startedAt,
+        reason: 'all_in_memory',
+        addressCount: lowerAddresses.length,
+      });
       return;
     }
 
+    const coreSetStartedAt = Date.now();
     const coreAddressSet = buildCoreAddressSet(accounts as Account[]);
+    traceAndroidBalancePerf('hydrate_cached_balances_core_set_end', {
+      elapsedMs: Date.now() - coreSetStartedAt,
+      coreCount: coreAddressSet.size,
+    });
+
     for (const address of lowerAddresses) {
+      const addressStartedAt = Date.now();
       const localTargets = buildBalanceLocalTargets(address);
 
       if (currentBalanceMap[address]) {
@@ -438,6 +477,11 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
             source: 'hydrateCachedBalancesForAccounts',
             hasMemoryValue: true,
           },
+        });
+        traceAndroidBalancePerf('hydrate_cached_balance_address_skip', {
+          elapsedMs: Date.now() - addressStartedAt,
+          address,
+          reason: 'memory_value',
         });
         continue;
       }
@@ -449,10 +493,17 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
         },
       });
 
+      const queryStartedAt = Date.now();
       const cacheBalance = await BalanceEntity.queryBalanceCache(
         address,
         coreAddressSet.has(address),
       );
+      traceAndroidBalancePerf('hydrate_cached_balance_query_end', {
+        elapsedMs: Date.now() - queryStartedAt,
+        address,
+        hasCache: !!cacheBalance,
+        isCore: coreAddressSet.has(address),
+      });
 
       if (!cacheBalance) {
         this.markHydrateSkipped(address, {
@@ -462,16 +513,29 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
             hasCache: false,
           },
         });
+        traceAndroidBalancePerf('hydrate_cached_balance_address_skip', {
+          elapsedMs: Date.now() - addressStartedAt,
+          address,
+          reason: 'no_cache',
+        });
         continue;
       }
 
+      const buildValueStartedAt = Date.now();
       const appChainUsdValue = getAppChainUsdValue(address);
       const value = buildPersistedBalanceValue(
         cacheBalance,
         appChainUsdValue,
         coreAddressSet.has(address),
       );
+      traceAndroidBalancePerf('hydrate_cached_balance_build_value_end', {
+        elapsedMs: Date.now() - buildValueStartedAt,
+        address,
+        appChainUsdValue,
+        totalBalance: value.totalBalance,
+      });
 
+      const applyStartedAt = Date.now();
       this.applyHydratedValue(address, value, {
         localTargets,
         detail: {
@@ -481,7 +545,21 @@ class AddressBalanceStore extends ResourceBaseStore<AddressBalanceResourceValue>
           totalBalance: value.totalBalance,
         },
       });
+      traceAndroidBalancePerf('hydrate_cached_balance_apply_end', {
+        elapsedMs: Date.now() - applyStartedAt,
+        address,
+      });
+      traceAndroidBalancePerf('hydrate_cached_balance_address_end', {
+        elapsedMs: Date.now() - addressStartedAt,
+        address,
+      });
     }
+
+    traceAndroidBalancePerf('hydrate_cached_balances_end', {
+      elapsedMs: Date.now() - startedAt,
+      accountCount: accounts.length,
+      addressCount: lowerAddresses.length,
+    });
   };
 
   batchGetTotalBalance = async (

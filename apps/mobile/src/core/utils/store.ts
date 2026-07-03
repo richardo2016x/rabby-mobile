@@ -1,4 +1,5 @@
 import { isEqual } from 'lodash';
+import { startStartupEarlySpan, traceStartupEarly } from './startupEarlyTrace';
 
 export type UpdaterOrPartials<Val = unknown> =
   | (Val extends any[] ? Val[number][] : Partial<Val>)
@@ -79,7 +80,22 @@ export function runIIFEFunc<T extends (...args: any[]) => any>(
   func: T,
   ...inputArags: any[]
 ) {
-  return func(...inputArags);
+  const name = func.name || 'anonymous';
+  const endTrace = startStartupEarlySpan('run_iife', {
+    name,
+  });
+
+  try {
+    const result = func(...inputArags);
+
+    endTrace('end');
+    return result;
+  } catch (error) {
+    endTrace('error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export function runDevIIFEFunc<T extends (...args: any[]) => any>(
@@ -90,4 +106,22 @@ export function runDevIIFEFunc<T extends (...args: any[]) => any>(
     return func(...inputArags);
   }
   return undefined;
+}
+
+export function traceSlowSyncStartupWork(
+  event: string,
+  startedAt: number,
+  data: Record<string, unknown> = {},
+  thresholdMs = 8,
+) {
+  const elapsedMs = Date.now() - startedAt;
+
+  if (elapsedMs < thresholdMs) {
+    return;
+  }
+
+  traceStartupEarly(event, {
+    ...data,
+    elapsedMs,
+  });
 }

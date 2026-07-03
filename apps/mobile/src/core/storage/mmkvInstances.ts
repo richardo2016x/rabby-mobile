@@ -1,45 +1,67 @@
-import { MMKV } from 'react-native-mmkv';
+import {
+  MMKV,
+  type Configuration as MMKVConfiguration,
+} from 'react-native-mmkv';
 import { MMKV_FILE_NAMES } from './mmkvConstants';
+import { startStartupEarlySpan } from '../utils/startupEarlyTrace';
 
-export const appMMKV = new MMKV({
+function createMMKVInstance(options: MMKVConfiguration) {
+  const endTrace = startStartupEarlySpan('mmkv_instance_create', {
+    id: options.id,
+    encrypted: !!options.encryptionKey,
+  });
+
+  try {
+    const instance = new MMKV(options);
+    endTrace('end');
+    return instance;
+  } catch (error) {
+    endTrace('error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+export const appMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.DEFAULT,
 });
 
-export const keyringMMKV = new MMKV({
+export const keyringMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.KEYRING,
   encryptionKey: 'keyring',
 });
 
-export const keychainMMKV = new MMKV({
+export const keychainMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.KEYCHAIN,
 });
 
-export const chainsMMKV = new MMKV({
+export const chainsMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.CHAINS,
 });
 
-export const dayCurveMMKV = new MMKV({
+export const dayCurveMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.DAYCURVE,
 });
 
-export const cexIdMMKV = new MMKV({
+export const cexIdMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.CEXID,
 });
 
-export const balance24hMMKV = new MMKV({
+export const balance24hMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.BALANCE_24H,
 });
 
-export const testnetBalanceMMKV = new MMKV({
+export const testnetBalanceMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.TESTNET_BALANCE,
 });
 
-export const walletConnectMMKV = new MMKV({
+export const walletConnectMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.WALLETCONNECT,
   encryptionKey: 'walletconnect',
 });
 
-export const lendingDataCacheMMKV = new MMKV({
+export const lendingDataCacheMMKV = createMMKVInstance({
   id: MMKV_FILE_NAMES.LENDING_DATA_CACHE,
 });
 

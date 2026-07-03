@@ -22,6 +22,11 @@ import {
   refreshAutolockTimeout,
 } from './autoLock';
 import { logger } from '@/utils/logger';
+import { registerDeferredService } from '../services/deferred';
+import {
+  LOCK_DEFERRED_SERVICE,
+  type LockDeferredService,
+} from '../services/lockDeferred';
 
 export const enum PasswordStatus {
   Unknown = -1,
@@ -598,6 +603,12 @@ export function deferNotifyUserManuallyUnlockUIReady() {
   // Capture this unlock so delayed callbacks cannot consume a later unlock.
   return () => notifyUserManuallyUnlockUIReady(ctx);
 }
+
+registerDeferredService<LockDeferredService>(LOCK_DEFERRED_SERVICE, {
+  safeVerifyPasswordAndUpdateUnlockTime,
+  updateUnlockTime,
+  clearCustomPassword,
+});
 
 runIIFEFunc(() => {
   const isFirstTimeAfterLaunchRef = {

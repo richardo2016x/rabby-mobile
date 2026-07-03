@@ -1,59 +1,90 @@
 import { RootNames } from '@/constant/layout';
 import { useAppThemeConfig, useTheme2024 } from '@/hooks/theme';
-import { trackGasAccountActiveStatusOncePerDay } from '@/utils/gasAccountAnalytics';
-import { autoLoginGasAccountIfNeeded } from '@/utils/autoLoginGasAccount';
 import { createGetStyles2024 } from '@/utils/styles';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect } from 'react';
-import { AppState, View } from 'react-native';
+import { AppState, InteractionManager, View } from 'react-native';
 
 import NormalScreenContainer2024 from '@/components2024/ScreenContainer/NormalScreenContainer';
-import * as apisAccount from '@/core/apis/account';
-import { browserService, preferenceService } from '@/core/services';
 import {
   resetHomeStartupReady,
   scheduleHomeStartupReady,
   traceHomeStartupReady,
   useHomePostStartupReady,
+  useHomeStartupReady,
 } from '@/core/utils/homeStartupReady';
+import {
+  startStartupTraceSpan,
+  traceStartup,
+  traceStartupOnce,
+} from '@/core/utils/startupTrace';
 import { apisHomeTabIndex, resetNavigationTo } from '@/hooks/navigation';
 import { matomoRequestEvent } from '@/utils/analytics';
 import { getReadyNavigationInstance } from '@/utils/navigation';
 import { ScreenSpecificStatusBar } from '@/components/FocusAwareStatusBar';
 import { useRendererDetect } from '@/components/Perf/PerfDetector';
 import { HomeGuidanceMultipleTabs } from '@/components2024/Animations/HomeGuidanceMultipleTabs';
-import { useTrack0331HomeActiveSnapshots } from '@/utils/analytics0331';
-import { deleteLongTimeCurveCache } from '@/utils/24balanceCurveCache';
-import { deleteLongTime24hBalanceCache } from '@/utils/24hBalanceCache';
-import dayjs from 'dayjs';
 import { setIsFoldMultiChart } from '../Address/components/MultiAssets/RenderRow/CurveChart';
 import { TabsMultiAssets } from '../Address/components/MultiAssets/TabsMultiAssets';
-import { useInitDetectDBAssets } from '../Search/useAssets';
 import { TmpHomeRefresher } from './components/TmpHomeRefresher';
-import { storeApiGasAccount } from '../GasAccount/hooks/atom';
 import { useHomePortfolioStore } from './hooks/useHomePortfolioSummary';
-import { storeApiAccounts } from '@/hooks/account';
-import { startInitReadableAccountStores } from '@/setup-app-before-render';
+import { callHomeStartupService } from '@/core/services/homeStartupDeferredClient';
 
-let hasStartedInitReadableAccountStoresOnHomeMount = false;
+const HomeDeferredLifecycle = React.lazy(
+  () => import('./components/HomeDeferredLifecycle'),
+);
 
-async function startInitReadableAccountStoresOnHomeMount() {
-  if (hasStartedInitReadableAccountStoresOnHomeMount) {
+let hasStartedInitReadableAccountStoresAfterHomeReady = false;
+
+async function startInitReadableAccountStoresAfterHomeReady() {
+  if (hasStartedInitReadableAccountStoresAfterHomeReady) {
+    traceStartup('home_ready_readable_stores_skipped', {
+      reason: 'already_started',
+    });
     return;
   }
 
-  const accounts = await storeApiAccounts.fetchAccounts();
-  if (!accounts.length || hasStartedInitReadableAccountStoresOnHomeMount) {
-    return;
-  }
+  const endTrace = startStartupTraceSpan('home_ready_readable_stores');
 
-  hasStartedInitReadableAccountStoresOnHomeMount = true;
-  await startInitReadableAccountStores();
+  try {
+    const fetchAccountsEndTrace = startStartupTraceSpan(
+      'home_ready_fetch_accounts',
+    );
+    const accounts = await callHomeStartupService('fetchAccounts', [
+      {
+        source: 'home_ready_readable_stores',
+      },
+    ]);
+    fetchAccountsEndTrace('end', {
+      count: accounts.length,
+    });
+
+    if (!accounts.length || hasStartedInitReadableAccountStoresAfterHomeReady) {
+      endTrace('skipped', {
+        reason: !accounts.length ? 'no_accounts' : 'already_started',
+      });
+      return;
+    }
+
+    hasStartedInitReadableAccountStoresAfterHomeReady = true;
+    await callHomeStartupService('initReadableAccountStores', []);
+    endTrace('end', {
+      count: accounts.length,
+    });
+  } catch (error) {
+    endTrace('error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 const detectHasAccounts = async () => {
   const result = { redirectAction: null as Function | null };
-  const hasAccountsInKeyring = await apisAccount.hasVisibleAccounts();
+  const hasAccountsInKeyring = await callHomeStartupService(
+    'hasVisibleAccounts',
+    [],
+  );
 
   if (!hasAccountsInKeyring) {
     result.redirectAction = () => {
@@ -65,20 +96,10 @@ const detectHasAccounts = async () => {
   return result;
 };
 
-function HomeDeferredLifecycle() {
-  useInitDetectDBAssets();
-  useTrack0331HomeActiveSnapshots();
-
-  return null;
-}
-
 function HomeStartupReadyScheduler() {
   useEffect(() => {
     resetHomeStartupReady();
     traceHomeStartupReady('home_mount');
-    startInitReadableAccountStoresOnHomeMount().catch(error => {
-      console.error('startInitReadableAccountStoresOnHomeMount::error', error);
-    });
 
     return scheduleHomeStartupReady();
   }, []);
@@ -86,12 +107,50 @@ function HomeStartupReadyScheduler() {
   return null;
 }
 
+function HomeReadableStoresBootstrap() {
+  const homeStartupReady = useHomeStartupReady();
+
+  useEffect(() => {
+    if (!homeStartupReady) {
+      return;
+    }
+
+    let disposed = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    traceStartup('home_ready_readable_stores_schedule');
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      timeoutId = setTimeout(() => {
+        if (disposed) {
+          return;
+        }
+
+        traceStartup('home_ready_readable_stores_run');
+        startInitReadableAccountStoresAfterHomeReady().catch(error => {
+          console.error(
+            'startInitReadableAccountStoresAfterHomeReady::error',
+            error,
+          );
+        });
+      }, 0);
+    });
+
+    return () => {
+      disposed = true;
+      interactionHandle.cancel?.();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [homeStartupReady]);
+
+  return null;
+}
+
 function HomePostStartupEffects({
   appThemeConfig,
-  trackGasAccountActive,
 }: {
   appThemeConfig: ReturnType<typeof useAppThemeConfig>;
-  trackGasAccountActive: () => void;
 }) {
   const homePostStartupReady = useHomePostStartupReady();
 
@@ -100,9 +159,19 @@ function HomePostStartupEffects({
       return;
     }
 
+    traceStartup('home_post_delete_long_cache_schedule');
     const timeoutId = setTimeout(() => {
-      deleteLongTimeCurveCache();
-      deleteLongTime24hBalanceCache();
+      const endTrace = startStartupTraceSpan('home_post_delete_long_cache');
+      callHomeStartupService('deleteLongTimeHomeCache', [])
+        .then(() => {
+          endTrace('end');
+        })
+        .catch(error => {
+          endTrace('error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          console.error('deleteLongTimeHomeCache error', error);
+        });
     }, 0);
 
     return () => clearTimeout(timeoutId);
@@ -116,7 +185,11 @@ function HomePostStartupEffects({
 
       (async () => {
         traceHomeStartupReady('home_has_visible_accounts_start');
+        const endTrace = startStartupTraceSpan('home_has_visible_accounts');
         const { redirectAction } = await detectHasAccounts();
+        endTrace('end', {
+          shouldRedirect: !!redirectAction,
+        });
         traceHomeStartupReady('home_has_visible_accounts_end', {
           shouldRedirect: !!redirectAction,
         });
@@ -133,18 +206,28 @@ function HomePostStartupEffects({
         return;
       }
 
-      trackGasAccountActive();
+      traceStartup('home_post_track_gas_account_active');
+      callHomeStartupService('trackGasAccountActiveStatusOncePerDay', []).catch(
+        error => {
+          console.error('trackGasAccountActiveStatusOncePerDay error', error);
+        },
+      );
 
       const subscription = AppState.addEventListener('change', state => {
         if (state === 'active') {
-          trackGasAccountActive();
+          callHomeStartupService(
+            'trackGasAccountActiveStatusOncePerDay',
+            [],
+          ).catch(error => {
+            console.error('trackGasAccountActiveStatusOncePerDay error', error);
+          });
         }
       });
 
       return () => {
         subscription.remove();
       };
-    }, [homePostStartupReady, trackGasAccountActive]),
+    }, [homePostStartupReady]),
   );
 
   useFocusEffect(
@@ -153,12 +236,25 @@ function HomePostStartupEffects({
         return;
       }
 
-      storeApiGasAccount.scheduleSnapshotRefresh({
-        reason: 'home_focus',
+      traceStartup('home_post_gas_account_refresh_start');
+      callHomeStartupService('scheduleGasAccountSnapshotRefresh', [
+        {
+          reason: 'home_focus',
+        },
+      ]).catch(error => {
+        console.error('scheduleGasAccountSnapshotRefresh error', error);
       });
-      autoLoginGasAccountIfNeeded().catch(error => {
-        console.error('autoLoginGasAccountIfNeeded error', error);
-      });
+      const endTrace = startStartupTraceSpan('home_post_auto_login_gas');
+      callHomeStartupService('autoLoginGasAccountIfNeeded', [])
+        .then(() => {
+          endTrace('end');
+        })
+        .catch(error => {
+          endTrace('error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          console.error('autoLoginGasAccountIfNeeded error', error);
+        });
     }, [homePostStartupReady]),
   );
 
@@ -167,6 +263,7 @@ function HomePostStartupEffects({
       return;
     }
 
+    traceStartup('home_post_theme_matomo');
     matomoRequestEvent({
       category: 'ThemeMode',
       action: `ThemeMode_${appThemeConfig}`,
@@ -178,37 +275,10 @@ function HomePostStartupEffects({
       return;
     }
 
-    const lastReportTime =
-      preferenceService.getPreference('lastReportTime') || 0;
-    if (!lastReportTime || !dayjs(lastReportTime).isToday()) {
-      preferenceService.setPreference({
-        lastReportTime: Date.now(),
-      });
-
-      matomoRequestEvent({
-        category: 'Websites Usage',
-        action: 'Website_LikeStatus',
-        label: `LikeDapp:${
-          browserService.bookmark.getState().ids?.length || 0
-        }`,
-      });
-
-      matomoRequestEvent({
-        category: 'Websites Usage',
-        action: 'Website_TabStatus',
-        label: `TabNumber:${
-          browserService.getBrowserTabs()?.tabs?.length || 0
-        }`,
-      });
-
-      matomoRequestEvent({
-        category: 'Watchlist Usage',
-        action: 'Watchlist_LikeStatus',
-        label: `LikeToken:${
-          preferenceService.getPreference('pinedQueue')?.length || 0
-        }`,
-      });
-    }
+    traceStartup('home_post_daily_report_check');
+    callHomeStartupService('runHomeDailyReport', []).catch(error => {
+      console.error('runHomeDailyReport error', error);
+    });
   }, [homePostStartupReady]);
 
   if (!homePostStartupReady) {
@@ -217,25 +287,22 @@ function HomePostStartupEffects({
 
   return (
     <>
-      <HomeDeferredLifecycle />
+      <React.Suspense fallback={null}>
+        <HomeDeferredLifecycle />
+      </React.Suspense>
       <HomeGuidanceMultipleTabs />
     </>
   );
 }
 
 function MultiAddressHome(): JSX.Element {
+  traceStartupOnce('multi_address_home_render');
   const { styles, colors2024, isLight } = useTheme2024({
     getStyle,
   });
   const appThemeConfig = useAppThemeConfig();
   const isLoss = useHomePortfolioStore(state => state.changeData.isLoss);
   useRendererDetect({ name: 'MultiAddressHome' });
-
-  const trackGasAccountActive = useCallback(() => {
-    trackGasAccountActiveStatusOncePerDay().catch(error => {
-      console.error('trackGasAccountActiveStatusOncePerDay error', error);
-    });
-  }, []);
 
   useEffect(() => {
     apisHomeTabIndex.setTabIndex(0);
@@ -263,6 +330,9 @@ function MultiAddressHome(): JSX.Element {
 
       <View
         style={[styles.paddingContainer]}
+        onLayout={() => {
+          traceStartupOnce('multi_address_home_content_layout');
+        }}
         onTouchStart={() => {
           setIsFoldMultiChart(true);
         }}>
@@ -270,27 +340,23 @@ function MultiAddressHome(): JSX.Element {
       </View>
 
       <HomeStartupReadyScheduler />
-      <HomePostStartupEffects
-        appThemeConfig={appThemeConfig}
-        trackGasAccountActive={trackGasAccountActive}
-      />
+      <HomeReadableStoresBootstrap />
+      <HomePostStartupEffects appThemeConfig={appThemeConfig} />
 
       <TmpHomeRefresher />
     </NormalScreenContainer2024>
   );
 }
 
-const getStyle = createGetStyles2024(
-  ({ colors2024, isLight, safeAreaInsets }) => ({
-    screenContainer: {
-      paddingTop: safeAreaInsets.top,
-    },
-    paddingContainer: {
-      paddingHorizontal: 0,
-      flex: 1,
-      flexGrow: 1,
-    },
-  }),
-);
+const getStyle = createGetStyles2024(({ safeAreaInsets }) => ({
+  screenContainer: {
+    paddingTop: safeAreaInsets.top,
+  },
+  paddingContainer: {
+    paddingHorizontal: 0,
+    flex: 1,
+    flexGrow: 1,
+  },
+}));
 
 export default MultiAddressHome;

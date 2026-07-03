@@ -23,6 +23,7 @@ import {
   transactionHistoryService,
 } from '@/core/services';
 import { perfEvents } from '@/core/utils/perf';
+import { startStartupTraceSpan } from '@/core/utils/startupTrace';
 import { UpdaterOrPartials } from '@/core/utils/store';
 import { EVENT_SWITCH_ACCOUNT, eventBus } from '@/utils/events';
 import { isSameAddress } from '@rabby-wallet/base-utils/dist/isomorphic/address';
@@ -44,13 +45,17 @@ export interface AccountStoreState {
 }
 
 export const NEWLY_ADDED_ACCOUNT_DURATION = 10 * 60 * 1000;
+export type FetchAccountsOptions = {
+  force?: boolean;
+  source?: string;
+};
 
 class AccountStore extends BaseStore<AccountStoreState> {
   private hasStartedLifecycle = false;
 
   private readonly fetchAccountsInParallel =
     this.createAvoidParallelAsyncMethod(
-      async (options?: { force?: boolean }) => {
+      async (options?: FetchAccountsOptions) => {
         this.setState(prev => {
           if (prev.isFetchingAccounts) {
             return prev;
@@ -105,8 +110,23 @@ class AccountStore extends BaseStore<AccountStoreState> {
     this.setField('pinnedAddresses', valOrFunc);
   };
 
-  fetchAccounts = async (options?: { force?: boolean }) => {
-    return this.fetchAccountsInParallel(options);
+  fetchAccounts = async (options?: FetchAccountsOptions) => {
+    const endTrace = startStartupTraceSpan('account_fetch', {
+      force: !!options?.force,
+      source: options?.source,
+    });
+    try {
+      const accounts = await this.fetchAccountsInParallel(options);
+      endTrace('end', {
+        count: accounts.length,
+      });
+      return accounts;
+    } catch (error) {
+      endTrace('error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   };
 
   fetchNewlyAddedAccounts = async () => {

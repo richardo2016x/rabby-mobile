@@ -17,9 +17,12 @@ import { useAppTheme, useThemeColors } from '@/hooks/theme';
 
 import { navigationRef } from '@/utils/navigation';
 import { RootNames } from './constant/layout';
-import { apisHomeTabIndex, useStackScreenConfig } from './hooks/navigation';
+import {
+  apisHomeTabIndex,
+  startNavigationAutoLockTimeoutListener,
+  useStackScreenConfig,
+} from './hooks/navigation';
 import { analytics, matomoLogScreenView } from './utils/analytics';
-import * as apisAccount from './core/apis/account';
 
 import { AppStatusBar } from './components/AppStatusBar';
 import AutoLockView from './components/AutoLockView';
@@ -55,6 +58,12 @@ import Backup from '@/screens/Address/Backup';
 import BiometricsStubModal from './components/AuthenticationModal/BiometricsStubModal';
 import { ScreenshotFeedbackGlobalHost } from './components/Screenshot/ScreenshotFeedbackGlobalHost';
 import { perfEvents } from './core/utils/perf';
+import {
+  markStartupTrace,
+  startStartupFrameTrace,
+  traceStartup,
+  traceStartupOnce,
+} from './core/utils/startupTrace';
 import { RefLikeObject } from './utils/type';
 import { useRendererDetect } from './components/Perf/PerfDetector';
 import { useTranslation } from 'react-i18next';
@@ -92,57 +101,13 @@ import { HomeScreenNavigator } from '@/perfs/loadables/homeRootNavigator';
 import { GetStartedNavigator } from './screens/Navigators/GetStartedNavigator';
 import { NEED_DEVSETTINGBLOCKS } from './constant';
 import { startReadableAccountBootstrapWarmups } from './setup-app-before-render';
+import {
+  useHomePostStartupReady,
+  useHomeStartupReady,
+} from './core/utils/homeStartupReady';
 
 const RootStack = createNativeStackNavigator<RootStackParamsList>();
 const AccountStack = createNativeStackNavigator<AccountNavigatorParamList>();
-
-type AppInitialRouteName =
-  | typeof RootNames.StackGetStarted
-  | typeof RootNames.StackRoot
-  | typeof RootNames.Unlock;
-
-function useAppInitialRouteName(isAppUnlocked: boolean) {
-  const [initialRouteName, setInitialRouteName] =
-    React.useState<AppInitialRouteName | null>(() =>
-      isAppUnlocked ? null : RootNames.Unlock,
-    );
-
-  React.useEffect(() => {
-    if (!isAppUnlocked) {
-      setInitialRouteName(prev => prev || RootNames.Unlock);
-      return;
-    }
-    if (initialRouteName) {
-      return;
-    }
-
-    let cancelled = false;
-
-    apisAccount
-      .hasVisibleAccounts()
-      .then(hasVisibleAccounts => {
-        if (cancelled) {
-          return;
-        }
-
-        setInitialRouteName(
-          hasVisibleAccounts ? RootNames.StackRoot : RootNames.StackGetStarted,
-        );
-      })
-      .catch(error => {
-        console.error('useAppInitialRouteName::error', error);
-        if (!cancelled) {
-          setInitialRouteName(RootNames.StackRoot);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialRouteName, isAppUnlocked]);
-
-  return initialRouteName;
-}
 
 const RootAnimOptions: React.ComponentProps<
   typeof RootStack.Navigator
@@ -289,6 +254,7 @@ const routeNameRef: RefLikeObject<string | undefined | null> = { current: '' };
 
 type DeferredGlobalsSlot = 'navigation-pre' | 'navigation-post';
 const DEFERRED_GLOBALS_AFTER_UNLOCK_DELAY_MS = 800;
+const POST_UNLOCK_GLOBALS_AFTER_HOME_DELAY_MS = 6000;
 
 function useRenderDeferredGlobalsAfterFirstUnlock(isAppUnlocked: boolean) {
   const [hasUnlockedOnce, setHasUnlockedOnce] = React.useState(isAppUnlocked);
@@ -324,12 +290,64 @@ function useRenderDeferredGlobalsAfterFirstUnlock(isAppUnlocked: boolean) {
   return hasUnlockedOnce;
 }
 
+function useDelayedStartupFlag({
+  enabled,
+  label,
+  delayMs,
+}: {
+  enabled: boolean;
+  label: string;
+  delayMs: number;
+}) {
+  const [ready, setReady] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    traceStartup('startup_delayed_flag_schedule', {
+      label,
+      delayMs,
+    });
+
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      timeoutId = setTimeout(() => {
+        if (disposed) {
+          return;
+        }
+
+        traceStartup('startup_delayed_flag_ready', {
+          label,
+          delayMs,
+        });
+        setReady(true);
+      }, delayMs);
+    });
+
+    return () => {
+      disposed = true;
+      interactionHandle.cancel?.();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [delayMs, enabled, label]);
+
+  return ready;
+}
+
 function useReadableAccountWarmupsOnHomeVisible({
   shouldWarmupReadableAccounts,
   hasVisibleAccounts,
+  homeStartupReady,
 }: {
   shouldWarmupReadableAccounts: boolean;
   hasVisibleAccounts: boolean;
+  homeStartupReady: boolean;
 }) {
   const startedRef = React.useRef(false);
 
@@ -337,17 +355,19 @@ function useReadableAccountWarmupsOnHomeVisible({
     if (
       startedRef.current ||
       !shouldWarmupReadableAccounts ||
-      !hasVisibleAccounts
+      !hasVisibleAccounts ||
+      !homeStartupReady
     ) {
       return;
     }
 
     startedRef.current = true;
+    traceStartup('readable_account_bootstrap_warmups_after_home_ready');
     startReadableAccountBootstrapWarmups().catch(error => {
       startedRef.current = false;
       console.error('useReadableAccountWarmupsOnHomeVisible::error', error);
     });
-  }, [shouldWarmupReadableAccounts, hasVisibleAccounts]);
+  }, [shouldWarmupReadableAccounts, hasVisibleAccounts, homeStartupReady]);
 }
 
 function AppNavigationDeferredGlobals({
@@ -445,6 +465,8 @@ export default function AppNavigation() {
     hasStoredKeyrings,
   } = useAppUnlocked();
   const canSkipInitialUnlock = isAppUnlocked || isUnlockSessionValid;
+  const homeStartupReady = useHomeStartupReady();
+  const homePostStartupReady = useHomePostStartupReady();
 
   const initialRouteName = hasVisibleAccounts
     ? canSkipInitialUnlock
@@ -456,16 +478,42 @@ export default function AppNavigation() {
   const shouldRenderDeferredGlobals =
     useRenderDeferredGlobalsAfterFirstUnlock(isAppUnlocked);
   const shouldRenderPostUnlockGlobals =
-    shouldRenderDeferredGlobals || isUnlockSessionValid;
+    shouldRenderDeferredGlobals ||
+    (isUnlockSessionValid && homePostStartupReady);
+  const shouldRenderPostUnlockGlobalsDelayed = useDelayedStartupFlag({
+    enabled: shouldRenderPostUnlockGlobals,
+    label: 'app_navigation_post_unlock_globals',
+    delayMs: POST_UNLOCK_GLOBALS_AFTER_HOME_DELAY_MS,
+  });
   useReadableAccountWarmupsOnHomeVisible({
     shouldWarmupReadableAccounts: !isAppUnlocked && isUnlockSessionValid,
     hasVisibleAccounts,
+    homeStartupReady,
+  });
+  traceStartupOnce('app_navigation_render', {
+    initialRouteName,
+    isAppUnlocked,
+    isUnlockSessionValid,
+    hasVisibleAccounts,
+    hasStoredKeyrings,
+    shouldRenderDeferredGlobals,
+    shouldRenderPostUnlockGlobals,
+    shouldRenderPostUnlockGlobalsDelayed,
+    homeStartupReady,
+    homePostStartupReady,
   });
 
   const onReady = useCallback<
     React.ComponentProps<typeof NavigationContainer>['onReady'] & object
   >(() => {
     const readyRootName = navigationRef.getCurrentRoute()?.name!;
+    markStartupTrace('app_navigation_ready', {
+      readyRootName,
+    });
+    startStartupFrameTrace('app_navigation_ready', {
+      durationMs: 5000,
+      longFrameThresholdMs: 50,
+    });
     perfEvents.emit('APP_NAVIGATION_READY', {
       readyRootName,
     });
@@ -481,8 +529,12 @@ export default function AppNavigation() {
   useDetermineExitAppOnPressBack();
 
   useRendererDetect({ name: 'AppNavigation' });
+  React.useEffect(() => {
+    startNavigationAutoLockTimeoutListener();
+  }, []);
 
   if (!initialRouteName) {
+    traceStartupOnce('app_navigation_render_pending_route');
     return (
       <AutoLockView.ForAppNav
         style={{ flex: 1, backgroundColor: colors['neutral-bg-2'] }}>
@@ -490,6 +542,10 @@ export default function AppNavigation() {
       </AutoLockView.ForAppNav>
     );
   }
+
+  traceStartupOnce('app_navigation_render_tree', {
+    initialRouteName,
+  });
 
   return (
     <AutoLockView.ForAppNav
@@ -508,10 +564,12 @@ export default function AppNavigation() {
               onReady={onReady}
               onStateChange={onStateChange}
               theme={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <AppNavigationDeferredGlobals
-                slot="navigation-pre"
-                enabled={shouldRenderPostUnlockGlobals}
-              />
+              <React.Suspense fallback={null}>
+                <AppNavigationDeferredGlobals
+                  slot="navigation-pre"
+                  enabled={shouldRenderPostUnlockGlobalsDelayed}
+                />
+              </React.Suspense>
               <RootStack.Navigator
                 screenOptions={{
                   ...RootAnimOptions,
@@ -750,23 +808,27 @@ export default function AppNavigation() {
                   />
                 </RootStack.Group>
               </RootStack.Navigator>
-              <AppNavigationDeferredGlobals
-                slot="navigation-post"
-                enabled={shouldRenderDeferredGlobals}
-              />
-              <AppNavigationPostUnlockGlobals
-                enabled={shouldRenderPostUnlockGlobals}
-              />
+              <React.Suspense fallback={null}>
+                <AppNavigationDeferredGlobals
+                  slot="navigation-post"
+                  enabled={shouldRenderPostUnlockGlobalsDelayed}
+                />
+                <AppNavigationPostUnlockGlobals
+                  enabled={shouldRenderPostUnlockGlobalsDelayed}
+                />
+              </React.Suspense>
             </NavigationContainer>
           </NavigationIndependentTree>
         </View>
         {shouldRenderDeferredGlobals ? <WideScreenDebugPanel /> : null}
       </View>
-      <AppNavigationOverlayGlobals
-        deferredGlobalsEnabled={shouldRenderDeferredGlobals}
-        postUnlockGlobalsEnabled={shouldRenderPostUnlockGlobals}
-      />
-      <BackgroundSecureBlurView />
+      <React.Suspense fallback={null}>
+        <AppNavigationOverlayGlobals
+          deferredGlobalsEnabled={shouldRenderPostUnlockGlobalsDelayed}
+          postUnlockGlobalsEnabled={shouldRenderPostUnlockGlobalsDelayed}
+        />
+        {homePostStartupReady ? <BackgroundSecureBlurView /> : null}
+      </React.Suspense>
     </AutoLockView.ForAppNav>
   );
 }

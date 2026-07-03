@@ -1,9 +1,3 @@
-import {
-  accountEvents,
-  filterOutTop10Accounts,
-  isDirectlySignableAccount,
-  isHardwareAccount,
-} from '@/core/apis/account';
 import { openapi } from '@/core/request';
 import { perfEvents } from '@/core/utils/perf';
 import {
@@ -16,14 +10,79 @@ import addressBalanceStore from '@/store/balance';
 import { useSortAddressList } from '@/screens/Address/useSortAddressList';
 import { filterMyAccounts } from '@/utils/account';
 import { eventBus, EventBusListeners, EVENTS } from '@/utils/events';
-import { KEYRING_CLASS } from '@rabby-wallet/keyring-utils';
+import { KEYRING_CLASS, KEYRING_TYPE } from '@rabby-wallet/keyring-utils';
 import { useEffect } from 'react';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
 import useAppChainStore from '@/store/appchain';
+import { callHomeStartupService } from '@/core/services/homeStartupDeferredClient';
 
 export const isTabsSwiping = {
   value: false,
 };
+
+function filterOutTop10Accounts<
+  T extends {
+    address: string;
+    balance?: number;
+  },
+>(sortedAccounts: T[], { gatherSameAddress = false } = {}) {
+  const topCount = 10;
+  const topRecords = new Set<string>();
+  const topAccounts: T[] = [];
+  const restAccounts: T[] = [];
+  let top10Addresses: string[] = [];
+
+  if (gatherSameAddress) {
+    for (const item of sortedAccounts) {
+      if (topRecords.size >= topCount) {
+        break;
+      }
+      topRecords.add(item.address.toLowerCase());
+    }
+
+    sortedAccounts.forEach(account => {
+      if (topRecords.has(account.address.toLowerCase())) {
+        topAccounts.push(account);
+      } else {
+        restAccounts.push(account);
+      }
+    });
+    top10Addresses = Array.from(topRecords);
+  } else {
+    topAccounts.push(...sortedAccounts.slice(0, topCount));
+    restAccounts.push(...sortedAccounts.slice(topCount));
+    topAccounts.forEach(account => {
+      const address = account.address.toLowerCase();
+      if (!topRecords.has(address)) {
+        top10Addresses.push(address);
+      }
+      topRecords.add(address);
+    });
+  }
+
+  return {
+    top10Accounts: topAccounts,
+    top10Addresses,
+    top10Records: topRecords,
+    restAccounts,
+  };
+}
+
+function isDirectlySignableAccount(account: KeyringAccountWithAlias) {
+  return (
+    account.type === KEYRING_TYPE.SimpleKeyring ||
+    account.type === KEYRING_TYPE.HdKeyring
+  );
+}
+
+function isHardwareAccount(account: KeyringAccountWithAlias) {
+  return (
+    account.type === KEYRING_CLASS.HARDWARE.LEDGER ||
+    account.type === KEYRING_CLASS.HARDWARE.TREZOR ||
+    account.type === KEYRING_CLASS.HARDWARE.KEYSTONE ||
+    account.type === KEYRING_CLASS.HARDWARE.ONEKEY
+  );
+}
 
 export function useAccountInfo() {
   const { accounts, fetchAccounts } = useAccounts({
@@ -112,8 +171,9 @@ function isAccountToShowReceiveTip(account: KeyringAccountWithAlias) {
 export async function getShowReceiveAddressTip(options?: {
   caredAccount?: KeyringAccountWithAlias | null;
   isForSingle?: boolean;
+  source?: string;
 }) {
-  const { caredAccount, isForSingle = false } = options || {};
+  const { caredAccount, isForSingle = false, source } = options || {};
 
   if (!caredAccount && isForSingle) {
     throw new Error('caredAccount is required when isForSingle is true');
@@ -122,7 +182,9 @@ export async function getShowReceiveAddressTip(options?: {
   let targetAccount = caredAccount;
   if (!isForSingle) {
     const myAccounts = await storeApiAccounts
-      .fetchAccounts()
+      .fetchAccounts({
+        source: source ?? 'getShowReceiveAddressTip',
+      })
       .then(accounts => filterMyAccounts(accounts));
     const accountsToCheck = myAccounts.filter(account =>
       isAccountToShowReceiveTip(account),
@@ -169,12 +231,25 @@ export async function getShowReceiveAddressTip(options?: {
 
 export function useAccountHomeShowReceiveTip(
   caredAccount?: KeyringAccountWithAlias | null,
+  options?: {
+    enabled?: boolean;
+    source?: string;
+  },
 ) {
   const isForSingle = !!caredAccount;
-  const [asyncResult, detect] = useAsyncFn(
-    () => getShowReceiveAddressTip({ caredAccount, isForSingle }),
-    [caredAccount, isForSingle],
-  );
+  const {
+    enabled = true,
+    source = isForSingle
+      ? 'useAccountHomeShowReceiveTip.single'
+      : 'useAccountHomeShowReceiveTip.multi',
+  } = options || {};
+  const [asyncResult, detect] = useAsyncFn(() => {
+    if (!enabled) {
+      return Promise.resolve(null);
+    }
+
+    return getShowReceiveAddressTip({ caredAccount, isForSingle, source });
+  }, [caredAccount, enabled, isForSingle, source]);
 
   if (asyncResult.error) {
     console.error('Failed to get show receive address tip', asyncResult.error);
@@ -192,11 +267,14 @@ export function useAccountHomeShowReceiveTip(
       : null;
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     detect();
-  }, [detect]);
+  }, [detect, enabled]);
 
   useEffect(() => {
-    if (isForSingle) return;
+    if (isForSingle || !enabled) return;
 
     const onTxCompleted: EventBusListeners[typeof EVENTS.TX_COMPLETED] = () => {
       detect();
@@ -216,25 +294,35 @@ export function useAccountHomeShowReceiveTip(
       sub.remove();
       // clearInterval(timer);
     };
-  }, [isForSingle, detect]);
+  }, [isForSingle, detect, enabled]);
 
   useEffect(() => {
-    if (isForSingle) return;
+    if (isForSingle || !enabled) return;
 
     const onAccountsChanged = () => {
       detect();
     };
-    const subAdd = accountEvents.subscribe('ACCOUNT_ADDED', onAccountsChanged);
-    const subRemove = accountEvents.subscribe(
-      'ACCOUNT_REMOVED',
-      onAccountsChanged,
-    );
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+    callHomeStartupService('subscribeHomeAccountsChanged', [onAccountsChanged])
+      .then(nextUnsubscribe => {
+        if (cancelled) {
+          nextUnsubscribe();
+          return;
+        }
+        unsubscribe = nextUnsubscribe;
+      })
+      .catch(error => {
+        if (!cancelled) {
+          console.error('subscribeHomeAccountsChanged error', error);
+        }
+      });
 
     return () => {
-      subAdd.remove();
-      subRemove.remove();
+      cancelled = true;
+      unsubscribe?.();
     };
-  }, [isForSingle, detect]);
+  }, [isForSingle, detect, enabled]);
 
   return {
     targetAccount,

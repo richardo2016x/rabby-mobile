@@ -1,15 +1,12 @@
 import * as Sentry from '@sentry/react-native';
+import { appStorage } from '../storage/mmkv';
 import {
-  appStorage,
-  keyringStorage,
-  normalizeKeyringState,
-} from '../storage/mmkv';
-import { APP_MMKV_KEYS } from '../storage/mmkvConstants';
-
-import {
-  ContactBookService,
-  ContactBookStore,
-} from '@rabby-wallet/service-address';
+  appEncryptor,
+  bootedKeyringState,
+  contactService,
+  keyringService,
+} from './keyringRuntime';
+export { appEncryptor, contactService, keyringService };
 
 import { findChainByID } from '@/utils/chain';
 import { DappService } from './dappService';
@@ -21,18 +18,8 @@ import { TransactionHistoryService } from './transactionHistory';
 import { TransactionWatcherService } from './transactionWatcher';
 import { WhitelistService } from './whitelist';
 import { SessionService } from './session';
-import WatchKeyring from '@rabby-wallet/eth-keyring-watch';
-import { GnosisKeyring } from '@rabby-wallet/eth-keyring-gnosis';
-import { KeyringService } from '@rabby-wallet/service-keyring';
-import RNEncryptor from './encryptor';
-import { onCreateKeyring, onSetAddressAlias } from './keyringParams';
 import { RabbyPointsService } from './rabbyPoints';
-import { LedgerKeyring } from '@rabby-wallet/eth-keyring-ledger';
-import { KeystoneKeyring } from '@rabby-wallet/eth-keyring-keystone';
 import { SwapService } from './swap';
-import { OneKeyKeyring } from '@/core/keyring-bridge/onekey/onekey-keyring';
-import SimpleKeyring from '@rabby-wallet/eth-simple-keyring';
-import HDKeyring from '@rabby-wallet/eth-hd-keyring';
 import { HDKeyringService } from './hdKeyringService';
 export { customTestnetService } from './customTestnetService';
 import { customRPCService } from './customRPCService';
@@ -40,21 +27,17 @@ export { customRPCService };
 import { BridgeService } from './bridge';
 import { GasAccountService } from './gasAccount';
 import { BrowserHistoryService } from './browserHistoryService';
-import { MockWalletConnectKeyring } from '../keyring-bridge/walletconnect/mock-walletconnect-keyring';
 import { migrateAppStorage, migrateServices } from '@/migrations/migrations';
 import { OfflineChainService } from './offlineChain';
 import { BrowserService } from './browserService';
 import { APP_STORE_NAMES } from '../storage/storeConstant';
-import { TrezorKeyring } from '../keyring-bridge/trezor/trezor-keyring';
 import { MetamaskModeService } from './metamaskModeService';
 import { SyncChainService } from './syncChainService';
 import { PerpsService } from './perpsService';
 import { CurrencyService } from './currencyService';
 import { LendingService } from './lendingService';
 import { perfEvents } from '../utils/perf';
-import { KeyringIntf } from '@rabby-wallet/keyring-utils';
 import { AutoConnectService } from './autoConnect';
-import { openapi } from '../request';
 import { setTxRpcClient } from '../utils/tx';
 import {
   setUserBehaviorTrackingOptOutCache,
@@ -62,10 +45,13 @@ import {
 } from '@/utils/trackingOptOut';
 import { syncFirebaseAnalyticsCollectionWithOptOut } from '@/utils/analytics';
 import { syncSentryUserBehaviorTrackingEnabled } from '@/core/sentry';
+import { registerDeferredService } from './deferred';
+import {
+  PREFERENCE_DEFERRED_SERVICE,
+  type PreferenceDeferredService,
+} from './preferenceDeferred';
 
 migrateAppStorage(appStorage);
-
-const keyringState = normalizeKeyringState().keyringData;
 
 function try_catch_issue_on_preference({
   pos,
@@ -74,7 +60,7 @@ function try_catch_issue_on_preference({
 }) {
   try {
     const preferenceData = appStorage.getItem(APP_STORE_NAMES.preference);
-    if (!preferenceData && keyringState) {
+    if (!preferenceData && bootedKeyringState) {
       const msg = `[${pos}] keyringState is not empty but preference is empty`;
       if (__DEV__) console.error(msg);
       Sentry.captureException(new Error(msg));
@@ -87,57 +73,7 @@ function try_catch_issue_on_preference({
 }
 
 try_catch_issue_on_preference({ pos: 'before_preference' });
-GnosisKeyring.setOpenapiService(openapi);
 setTxRpcClient(payload => customRPCService.defaultEthRPC(payload));
-
-const keyringClasses = [
-  MockWalletConnectKeyring,
-  WatchKeyring,
-  LedgerKeyring,
-  KeystoneKeyring,
-  OneKeyKeyring,
-  GnosisKeyring,
-  SimpleKeyring,
-  HDKeyring,
-  TrezorKeyring,
-] as (typeof KeyringIntf)[];
-
-export const contactService = new ContactBookService({
-  storageAdapter: appStorage,
-});
-contactService.setBeforeSetKV((k, v) => {
-  switch (k) {
-    case 'aliases': {
-      const aliases = v as unknown as ContactBookStore['aliases'];
-      perfEvents.emit('CONTACTS_ALIASES_UPDATE', {
-        nextState: aliases,
-      });
-      break;
-    }
-  }
-});
-
-export const appEncryptor = new RNEncryptor();
-
-export const keyringService = new KeyringService({
-  encryptor: new RNEncryptor(),
-  keyringClasses,
-  onSetAddressAlias,
-  onCreateKeyring,
-  contactService,
-});
-keyringService.loadStore(keyringState || {});
-
-keyringService.store.subscribe(value => {
-  // // leave here to test migrate legacyData to keyringData
-  // if (__DEV__) {
-  //   appStorage.setItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE, value);
-  // }
-
-  keyringStorage.clearAll();
-  // keyringStorage.flushToDisk?.();
-  keyringStorage.setItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE, value);
-});
 
 export const dappService = new DappService({
   storageAdapter: appStorage,
@@ -156,6 +92,15 @@ export const preferenceService = new PreferenceService({
   keyringService,
   sessionService,
 });
+
+registerDeferredService<PreferenceDeferredService>(
+  PREFERENCE_DEFERRED_SERVICE,
+  {
+    getPasswordIsAutoGenerated() {
+      return !!preferenceService.store.passwordIsAutoGenerated;
+    },
+  },
+);
 
 preferenceService.setBeforeSetKV((k, v) => {
   if (k === USER_BEHAVIOR_TRACKING_OPT_OUT_KEY) {
@@ -209,8 +154,6 @@ export const autoConnectService = new AutoConnectService({
   getFallbackAccount: () => preferenceService.getFallbackAccount(),
 });
 
-transactionWatcherService.roll();
-
 const syncPendingTxs = () => {
   const pendings = transactionHistoryService
     .getTransactionGroups()
@@ -234,8 +177,6 @@ const syncPendingTxs = () => {
     });
   });
 };
-
-syncPendingTxs();
 
 export const rabbyPointsService = new RabbyPointsService({
   storageAdapter: appStorage,
@@ -292,26 +233,38 @@ export const currencyService = new CurrencyService({
 
 export { default as debugLogService } from './debugLogService';
 
-migrateServices({
-  contactBook: contactService,
-  dapps: dappService,
-  bridge: bridgeService,
-  browserHistory: browserHistoryService,
-  preference: preferenceService,
-  whitelist: whitelistService,
-  txHistory: transactionHistoryService,
-  transactions: transactionWatcherService,
-  transactionBroadcastWatcher: transactionBroadcastWatcherService,
-  securityEngine: securityEngineService,
-  RabbyPoints: rabbyPointsService,
-  swap: swapService,
-  HDKeyRingLastAddAddrTime: hdKeyringService,
-  gasAccount: gasAccountService,
-  offlineChain: offlineChainService,
-  browser: browserService,
-  metamaskMode: metamaskModeService,
-  syncChain: syncChainService,
-  perps: perpsService,
-  lending: lendingService,
-  currency: currencyService,
-});
+let hasStartedServiceMaintenanceAfterStartup = false;
+
+export function startServiceMaintenanceAfterStartup() {
+  if (hasStartedServiceMaintenanceAfterStartup) {
+    return;
+  }
+
+  hasStartedServiceMaintenanceAfterStartup = true;
+  migrateServices({
+    contactBook: contactService,
+    dapps: dappService,
+    bridge: bridgeService,
+    browserHistory: browserHistoryService,
+    preference: preferenceService,
+    whitelist: whitelistService,
+    txHistory: transactionHistoryService,
+    transactions: transactionWatcherService,
+    transactionBroadcastWatcher: transactionBroadcastWatcherService,
+    securityEngine: securityEngineService,
+    RabbyPoints: rabbyPointsService,
+    swap: swapService,
+    HDKeyRingLastAddAddrTime: hdKeyringService,
+    gasAccount: gasAccountService,
+    offlineChain: offlineChainService,
+    browser: browserService,
+    metamaskMode: metamaskModeService,
+    syncChain: syncChainService,
+    perps: perpsService,
+    lending: lendingService,
+    currency: currencyService,
+  });
+
+  transactionWatcherService.roll();
+  syncPendingTxs();
+}

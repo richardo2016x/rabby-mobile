@@ -5,9 +5,21 @@ import { BALANCE_EXPIRED_TIME } from '@/constant/expireTime';
 import { prepareAppDataSource } from '../imports';
 import { columnConverter } from './_helpers';
 import type { EvmTotalBalanceResponse } from '../hooks/balance';
-import { APP_DB_PREFIX, ORM_TABLE_NAMES } from '../constant';
-import { PreparedStatement } from '@op-engineering/op-sqlite';
+import { ORM_TABLE_NAMES } from '../constant';
 import { ParseEntity } from '@/core/utils/typeorm';
+import { IS_ANDROID } from '@/core/native/utils';
+import { logger } from '@/utils/logger';
+
+function traceAndroidBalanceEntityPerf(
+  event: string,
+  data: Record<string, unknown> = {},
+) {
+  if (!IS_ANDROID) {
+    return;
+  }
+
+  logger.info(`[RabbyUnlockPerf:balanceEntity] ${event}`, data);
+}
 
 @ParseEntity()
 @Entity(ORM_TABLE_NAMES.cache_balance)
@@ -86,21 +98,58 @@ export class BalanceEntity extends EntityAddressAssetBase {
     owner_addr: string,
     isCore: boolean,
   ): Promise<EvmTotalBalanceResponse | null> {
+    const startedAt = Date.now();
+    const prepareStartedAt = Date.now();
     await prepareAppDataSource();
-    const result = await this.getRepository().findOneBy({
+    traceAndroidBalanceEntityPerf('query_balance_cache_prepare_end', {
+      elapsedMs: Date.now() - prepareStartedAt,
       owner_addr,
       isCore,
     });
 
+    const queryStartedAt = Date.now();
+    const result = await this.getRepository().findOneBy({
+      owner_addr,
+      isCore,
+    });
+    traceAndroidBalanceEntityPerf('query_balance_cache_find_end', {
+      elapsedMs: Date.now() - queryStartedAt,
+      owner_addr,
+      isCore,
+      hasResult: !!result,
+    });
+
     if (!result) {
+      traceAndroidBalanceEntityPerf('query_balance_cache_end', {
+        elapsedMs: Date.now() - startedAt,
+        owner_addr,
+        isCore,
+        hasResult: false,
+      });
       return null;
     }
+
+    const parseStartedAt = Date.now();
+    const chainList =
+      columnConverter.jsonStringToObj(result?.chain_list || '[]') || [];
+    traceAndroidBalanceEntityPerf('query_balance_cache_parse_end', {
+      elapsedMs: Date.now() - parseStartedAt,
+      owner_addr,
+      isCore,
+      chainListCount: chainList.length,
+      chainListTextLength: result?.chain_list?.length || 0,
+    });
+    traceAndroidBalanceEntityPerf('query_balance_cache_end', {
+      elapsedMs: Date.now() - startedAt,
+      owner_addr,
+      isCore,
+      hasResult: true,
+    });
 
     return {
       total_usd_value: result?.balance || 0,
       evm_usd_value: result?.evm_usd_value || 0,
-      chain_list:
-        columnConverter.jsonStringToObj(result?.chain_list || '[]') || [],
+      chain_list: chainList,
     };
   }
 

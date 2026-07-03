@@ -1,4 +1,5 @@
 import { register } from 'react-native-bundle-splitter';
+import { startStartupTraceSpan } from '@/core/utils/startupTrace';
 
 export { register as registerLazyComponent };
 
@@ -23,6 +24,17 @@ type RegisteredAppScreen<T extends React.ComponentType<any>> =
       React.RefAttributes<unknown>
   >;
 
+function inferLoaderName(config: RegisterSharedConfig & { loader: () => any }) {
+  if (config.name || config.group) {
+    return config.name || config.group;
+  }
+
+  const loaderSource = String(config.loader);
+  const importPath = loaderSource.match(/import\(['"]([^'"]+)['"]\)/)?.[1];
+
+  return importPath || 'anonymous';
+}
+
 export function registerAppScreen<
   T extends React.ComponentType<any>,
   M extends { default: T },
@@ -33,7 +45,30 @@ export function registerAppScreen<T extends React.ComponentType<any>>(
 export function registerAppScreen<T extends React.ComponentType<any>>(
   config: RegisterDefaultExportConfig<T, { default: T }>,
 ) {
+  const loaderName = inferLoaderName(config);
+  const wrappedConfig = {
+    ...config,
+    loader: () => {
+      const endTrace = startStartupTraceSpan('loadable_component_import', {
+        name: loaderName,
+      });
+
+      return config.loader().then(
+        module => {
+          endTrace('end');
+          return module;
+        },
+        error => {
+          endTrace('error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        },
+      );
+    },
+  };
+
   return register<React.ComponentProps<T>>(
-    config as Parameters<typeof register>[0],
+    wrappedConfig as Parameters<typeof register>[0],
   );
 }

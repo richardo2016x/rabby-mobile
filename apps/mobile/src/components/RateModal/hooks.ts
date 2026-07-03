@@ -25,6 +25,7 @@ import {
 import { useShallow } from 'zustand/react/shallow';
 import { zCreate } from '@/core/utils/reexports';
 import { perfEvents } from '@/core/utils/perf';
+import { startStartupTraceSpan } from '@/core/utils/startupTrace';
 
 const TX_COUNT_LIMIT = isNonPublicProductionEnv ? 1 : 3; // Minimum number of transactions before showing the rate guide
 const STAR_COUNT = 5;
@@ -134,6 +135,9 @@ export function useIncreaseTxCountOnAppTop({
   isTop?: boolean;
 }) {
   useEffect(() => {
+    const endTrace = startStartupTraceSpan('rate_guide_top_listener_effect', {
+      isTop,
+    });
     if (!isTop) return;
 
     const onTxCompleted: EventBusListeners[typeof EVENTS.TX_COMPLETED] =
@@ -164,6 +168,7 @@ export function useIncreaseTxCountOnAppTop({
         });
       };
     eventBus.addListener(EVENTS.TX_COMPLETED, onTxCompleted);
+    endTrace('end');
 
     return () => {
       eventBus.removeListener(EVENTS.TX_COMPLETED, onTxCompleted);

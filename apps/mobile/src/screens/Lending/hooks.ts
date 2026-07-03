@@ -60,6 +60,14 @@ const marketAtom = atomByMMKV(
   },
 );
 
+function debugLendingPerf(...args: Parameters<typeof console.debug>) {
+  if (!__DEV__) {
+    return;
+  }
+
+  console.debug(...args);
+}
+
 const getMarketInfo = (market?: CustomMarket) => {
   const marketData: MarketDataType | undefined =
     !!market && marketsData[market as CustomMarket]
@@ -339,7 +347,7 @@ async function computeFormattedReservesAndIncentives({
         baseCurrencyData.marketReferenceCurrencyPriceInUsd,
     })) || []
   ).map(mapItem);
-  console.debug(
+  debugLendingPerf(
     '[perf] formattedReservesAndIncentivesAtom:: formattedReserves',
     formattedReserves,
   );
@@ -355,7 +363,7 @@ async function computeFormattedReservesAndIncentives({
       eModes,
     })) || []
   ).map(mapItem) as unknown as FormattedReservesAndIncentives[];
-  console.debug(
+  debugLendingPerf(
     '[perf] formattedReservesAndIncentivesAtom:: formattedPoolReservesAndIncentives',
     formattedPoolReservesAndIncentives,
   );
@@ -407,7 +415,7 @@ async function computeIUserSummary({
   const currentTimestamp = dayjs().unix();
   const userReservesArray = userReserves.userReserves;
 
-  console.debug(
+  debugLendingPerf(
     '[perf] iUserSummaryAtom:: userReservesArray, formattedReserves',
     userReservesArray,
     formattedReserves,
@@ -429,7 +437,7 @@ async function computeIUserSummary({
   });
   const endTime = Date.now();
   const diff = endTime - startTime;
-  console.debug(
+  debugLendingPerf(
     '[perf] iUserSummaryAtom:: syncResult, startTime, endTime, diff',
     syncResult,
     startTime,
@@ -470,7 +478,7 @@ function computeDisplayPoolReserves({
     return [];
   }
 
-  console.debug('[perf] displayPoolReservesAtom::');
+  debugLendingPerf('[perf] displayPoolReservesAtom::');
 
   const baseCurrencyData = reserves.baseCurrencyData;
   const chainEnum =
@@ -527,7 +535,9 @@ function computeWrapperPoolReserveAndFinalDisplayPoolReserves({
     };
   }
 
-  console.debug('[perf] wrapperPoolReserveAndFinalDisplayPoolReservesAtom::');
+  debugLendingPerf(
+    '[perf] wrapperPoolReserveAndFinalDisplayPoolReservesAtom::',
+  );
 
   const wrapperReserve = displayPoolReserves.find(item => {
     return isSameAddress(
@@ -711,7 +721,7 @@ async function applyRemoteData(
     iUserSummary: iUserSummary as UserSummary,
   });
 
-  console.debug('[perf] lending:: remote data will be set', newVal);
+  debugLendingPerf('[perf] lending:: remote data will be set', newVal);
   remoteDataState.setState({
     ...prev,
     [lendingDataKey]: newVal,
@@ -953,7 +963,7 @@ const useRefreshLendingWalletBalances = () => {
 };
 
 const useLendingSummary = () => {
-  console.debug('[perf] useLendingSummary:: called');
+  debugLendingPerf('[perf] useLendingSummary:: called');
   const { iUserSummary } = useLendingISummary();
   const { lendingDataKey } = useCurrentLendingDataKey();
   const {

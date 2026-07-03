@@ -56,11 +56,8 @@ export async function initializeAppDataSource(
       },
     );
   } else if (!appDataSourceInitRef.current) {
-    const errMsg =
-      'initializeAppDataSource: app data source has not start initialization';
-    const err = new Error(errMsg);
-    throw err;
-    // Sentry.captureException(err)
+    const { startInitializeAppDataSource } = await import('./orm');
+    return startInitializeAppDataSource();
   }
 
   await appDataSourceInitRef.current;
@@ -130,9 +127,10 @@ export async function dropAppDataSourceAndQuitApp({
   let appDataSource: DataSource | null = null;
 
   try {
-    appDataSource = await prepareAppDataSource();
-    await appDataSource.dropDatabase();
-    await appDataSource.query('VACUUM');
+    const preparedAppDataSource = await prepareAppDataSource();
+    appDataSource = preparedAppDataSource;
+    await preparedAppDataSource.dropDatabase();
+    await preparedAppDataSource.query('VACUUM');
   } catch (error) {
     console.error('[dropAppDataSourceAndQuitApp] clear database failed', error);
   } finally {

@@ -1,17 +1,11 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { Linking } from 'react-native';
 import { t } from 'i18next';
-import { keyringService } from '@/core/services';
+import { keyringService } from '@/core/services/keyringRuntime';
 import { urlUtils } from '@rabby-wallet/base-utils';
-import { browserApis } from './browser/useBrowser';
 import useMount from 'react-use/lib/useMount';
 import { toastWithIcon } from '@/components2024/Toast';
 import { RcIconInfoForToast } from '@/screens/Unlock/icons';
-import {
-  getRabbyLockInfo,
-  isUnlockSessionValid,
-  PasswordStatus,
-} from '@/core/apis/lock';
 import { getPwdStatus } from './useLock';
 import {
   ALLOWED_UL_DOMAINS,
@@ -19,15 +13,17 @@ import {
   WALLETCONNECT_REDIRECT_PATH,
 } from '@/constant/universalLink';
 import { RefLikeObject } from '@/utils/type';
-import {
-  markWalletConnectDappRedirectPending,
-  pairWalletConnectUri,
-  parseWalletConnectUriFromLink,
-} from '@/core/walletconnect';
+import { markWalletConnectDappRedirectPending } from '@/core/walletconnect/redirectState';
+import { parseWalletConnectUriFromLink } from '@/core/walletconnect/uri';
+import { startStartupTraceSpan, traceStartup } from '@/core/utils/startupTrace';
 
 const nextAppLinkRef = {
   current: '' as string,
 };
+
+const enum PasswordStatus {
+  UseBuiltIn = 1,
+}
 
 function getNextAppLink() {
   return nextAppLinkRef.current;
@@ -128,20 +124,30 @@ const handleActions: OnParseUrlAndProcessAction = payload => {
       if (!payload.dappUrl) {
         return;
       }
-      browserApis.openTab(payload.dappUrl, {
-        isNewTab: true,
-      });
+      import('./browser/useBrowser')
+        .then(({ browserApis }) => {
+          browserApis.openTab(payload.dappUrl!, {
+            isNewTab: true,
+          });
+        })
+        .catch(error => {
+          console.error('universalLink open dapp::error', error);
+        });
       break;
     case 'walletconnect-uri':
       if (!payload.uri) {
         return;
       }
-      pairWalletConnectUri({
-        uri: payload.uri,
-        source: 'deeplink',
-      }).catch(() => {
-        // WalletConnectModalHost consumes the pairing error event once.
-      });
+      import('@/core/walletconnect/pairing')
+        .then(({ pairWalletConnectUri }) =>
+          pairWalletConnectUri({
+            uri: payload.uri!,
+            source: 'deeplink',
+          }),
+        )
+        .catch(() => {
+          // WalletConnectModalHost consumes the pairing error event once.
+        });
       break;
     case 'walletconnect-redirect':
       markWalletConnectDappRedirectPending('metadata_redirect');
@@ -151,6 +157,9 @@ const handleActions: OnParseUrlAndProcessAction = payload => {
 
 const hideToastRef: RefLikeObject<() => void | null> = { current: () => null };
 const handleAppLink = async (url: string, isInit = false) => {
+  const { getRabbyLockInfo, isUnlockSessionValid } = await import(
+    '@/core/apis/lock'
+  );
   if (keyringService.isUnlocked() || isUnlockSessionValid()) {
     // Parse the link when the wallet is fully unlocked or in a valid post-unlock session.
     parseActionAndProcessLink(url, handleActions);
@@ -178,19 +187,23 @@ const handleAppLink = async (url: string, isInit = false) => {
 
 export function useUniversalLinkOnTop() {
   useMount(() => {
+    const endTrace = startStartupTraceSpan('universal_link_initial_url_effect');
     Linking.getInitialURL().then(url => {
       if (url) {
         console.debug('[useUniversalLinkOnTop] Initial URL:', url);
         handleAppLink(url, true);
       }
     });
+    endTrace('scheduled');
   });
 
   useEffect(() => {
+    const endTrace = startStartupTraceSpan('universal_link_listener_effect');
     const subscription = Linking.addEventListener('url', event => {
       console.debug('[useUniversalLinkOnTop] App Link:', event.url);
       handleAppLink(event.url);
     });
+    endTrace('end');
 
     return () => {
       subscription.remove();
@@ -198,6 +211,7 @@ export function useUniversalLinkOnTop() {
   }, []);
 
   useLayoutEffect(() => {
+    traceStartup('universal_link_unlock_listener_layout_effect_start');
     const onUnlock = () => {
       hideToastRef.current?.();
       const nextAppLink = getNextAppLink();
@@ -207,6 +221,7 @@ export function useUniversalLinkOnTop() {
       }
     };
     keyringService.on('unlock', onUnlock);
+    traceStartup('universal_link_unlock_listener_layout_effect_end');
 
     return () => {
       keyringService.off('unlock', onUnlock);

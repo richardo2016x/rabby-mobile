@@ -1,4 +1,4 @@
-import { DataSourceOptions } from 'typeorm/browser';
+import { DataSource, DataSourceOptions } from 'typeorm/browser';
 
 import { SQLite } from '@/core/databases/exports';
 import { getMigrations } from './migrations';
@@ -14,6 +14,7 @@ import {
   RnSqlExecutionTimes,
 } from './logger';
 import { ALL_ORM_ENTITIES } from './entities';
+import { startStartupTraceSpan } from '@/core/utils/startupTrace';
 
 const dbOptions: DataSourceOptions = {
   type: 'react-native',
@@ -44,9 +45,28 @@ const dbOptions: DataSourceOptions = {
   migrations: getMigrations(),
 };
 
-initializeAppDataSource(dbOptions).catch(err => {
-  console.log('initializeAppDataSource error', err);
-});
+let initializeAppDataSourcePromise: Promise<DataSource> | null = null;
+
+export function startInitializeAppDataSource() {
+  if (!initializeAppDataSourcePromise) {
+    const endTrace = startStartupTraceSpan('database_default_init');
+    initializeAppDataSourcePromise = initializeAppDataSource(dbOptions)
+      .catch(err => {
+        endTrace('error', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        initializeAppDataSourcePromise = null;
+        console.log('initializeAppDataSource error', err);
+        throw err;
+      })
+      .then(appDataSource => {
+        endTrace('end');
+        return appDataSource;
+      });
+  }
+
+  return initializeAppDataSourcePromise;
+}
 
 export async function exp_reConnectAppDataSource() {
   abortAllSyncTasks();

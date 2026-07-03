@@ -18,7 +18,8 @@ import { type StateStorage } from 'zustand/middleware';
 import { walkThroughMMKVFiles } from '../utils/appFS';
 import RNHelpers from '../native/RNHelpers';
 import { IS_IOS } from '../native/utils';
-import { runDevIIFEFunc } from '../utils/store';
+import { runDevIIFEFunc, traceSlowSyncStartupWork } from '../utils/store';
+import { startStartupEarlySpan } from '../utils/startupEarlyTrace';
 import { reactotronEvents } from '../utils/reactotron-plugins/_utils';
 import {
   zCreate,
@@ -54,7 +55,9 @@ export function getJsonValueStringCompat(
   options?: MMKVConfiguration,
 ): string | null {
   const raw = mmkv.getString(key);
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
   let finalString: string | null = raw;
 
   try {
@@ -88,11 +91,20 @@ export function makeMMKVStorageByInstance(
   options?: MMKVConfiguration,
 ) {
   function getItem<T>(key: string): T | null {
+    const startedAt = Date.now();
     const value = mmkv.getString(key);
-
-    return !value
+    const result = !value
       ? null
       : stringUtils.safeParseJSON(value, { defaultValue: null });
+
+    traceSlowSyncStartupWork('mmkv_get_item_slow', startedAt, {
+      id: options?.id,
+      key,
+      valueLength: typeof value === 'string' ? value.length : 0,
+      hasValue: !!value,
+    });
+
+    return result;
   }
 
   function setItem<T>(key: string, value: T): void {
@@ -161,6 +173,7 @@ const { storage: keyringStorage, mmkv: keyringMMKVInstance } =
   });
 
 export function normalizeKeyringState() {
+  const endTrace = startStartupEarlySpan('normalize_keyring_state');
   const legacyData = appStorage.getItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE);
   const result = {
     legacyData,
@@ -168,17 +181,30 @@ export function normalizeKeyringState() {
       keyringStorage.getItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE) || legacyData,
   };
 
-  if (legacyData) appMMKVInstance.trim();
+  if (legacyData) {
+    appMMKVInstance.trim();
+  }
 
   // console.debug('result.legacyData', result.legacyData);
   // console.debug('result.keyringData', result.keyringData);
-  if (!result.legacyData) return result;
+  if (!result.legacyData) {
+    endTrace('end', {
+      hasLegacyData: false,
+      hasKeyringData: !!result.keyringData,
+    });
+    return result;
+  }
 
   keyringStorage.setItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE, result.legacyData);
   result.keyringData = result.legacyData;
 
   appStorage.removeItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE);
   appMMKVInstance.trim();
+
+  endTrace('end', {
+    hasLegacyData: true,
+    hasKeyringData: !!result.keyringData,
+  });
 
   return result;
 }
@@ -191,9 +217,26 @@ export const keyringMMKVForDebug = __DEV__
   : (null as any as typeof keyringMMKVInstance);
 export { appStorage, keyringStorage, appMMKVInstance, keyringMMKVInstance };
 
-export const IS_BOOTED_USER =
-  !!appStorage.getItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE) ||
-  !!keyringStorage.getItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE);
+function computeIsBootedUser() {
+  const endTrace = startStartupEarlySpan('compute_is_booted_user');
+  const hasLegacyData = !!appStorage.getItem(
+    APP_MMKV_KEYS.LEGACY_KEYRING_STATE,
+  );
+  const hasKeyringData =
+    hasLegacyData ||
+    !!keyringStorage.getItem(APP_MMKV_KEYS.LEGACY_KEYRING_STATE);
+  const result = hasLegacyData || hasKeyringData;
+
+  endTrace('end', {
+    hasLegacyData,
+    hasKeyringData,
+    result,
+  });
+
+  return result;
+}
+
+export const IS_BOOTED_USER = computeIsBootedUser();
 
 export const enum MMKVStorageStrategy {
   'legacy' = -1,
@@ -437,7 +480,9 @@ export function removeLegacyMMKVStorageByKey(key: `@${string}`) {
 
 // iife process
 (async function ensureMmkvFilesNotBackupable() {
-  if (!IS_IOS) return;
+  if (!IS_IOS) {
+    return;
+  }
 
   walkThroughMMKVFiles(
     ({ fileBaseName, filePath, fileExist, crcFilePath, crcFileExist }) => {

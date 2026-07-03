@@ -11,6 +11,7 @@ const LazyModalsSubmitFeedbackByScreenshotStub = registerAppScreen<
     import('./ScreenshotModal').then(m => ({
       default: m.ModalsSubmitFeedbackByScreenshotStub,
     })),
+  name: 'ScreenshotFeedbackGlobalHost.ModalsSubmitFeedbackByScreenshotStub',
 });
 
 export function ScreenshotFeedbackGlobalHost() {

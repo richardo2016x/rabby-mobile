@@ -7,6 +7,7 @@ import { createGetStyles2024 } from '@/utils/styles';
 import { useRendererDetect } from '@/components/Perf/PerfDetector';
 import { perfEvents } from '@/core/utils/perf';
 import { runIIFEFunc } from '@/core/utils/store';
+import { startStartupTraceSpan } from '@/core/utils/startupTrace';
 import { apisHomeTabIndex, HomeTabName } from '@/hooks/navigation';
 import { HomeCustomMaterialTabBar } from '@/screens/Home/components/CustomTabBar';
 import { TabsTopHeader } from '@/screens/Home/components/OverviewTopHeader';
@@ -15,9 +16,6 @@ import { matomoRequestEvent } from '@/utils/analytics';
 import { RabbyControlledContainer as TabsContainer } from '@rabby-wallet/react-native-collapsible-tab-view/src/RabbyControlledContainer';
 import { Tab as TabsTab } from '@rabby-wallet/react-native-collapsible-tab-view/src/Tab';
 import { isTabsSwiping } from './hooks';
-import { NFTList } from './NFTList';
-import { ProtocolList } from './ProtocolList';
-import { TokenList } from './TokenList';
 import { IS_IOS } from '@/core/native/utils';
 import { HomeOverview } from '@/screens/Home/components/HomeOverview';
 import { homeDrawerAnimateMutable } from '@/screens/Home/hooks/useHomeDrawerAnimate';
@@ -49,6 +47,57 @@ runIIFEFunc(() => {
 const onIndexChange = (idx: number) => {
   apisHomeTabIndex.setTabIndex(idx);
 };
+
+const LazyTokenList = React.lazy(() => {
+  const endTrace = startStartupTraceSpan('home_tab_token_import');
+
+  return import('./TokenList').then(
+    m => {
+      endTrace('end');
+      return { default: m.TokenList };
+    },
+    error => {
+      endTrace('error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    },
+  );
+});
+
+const LazyProtocolList = React.lazy(() => {
+  const endTrace = startStartupTraceSpan('home_tab_protocol_import');
+
+  return import('./ProtocolList').then(
+    m => {
+      endTrace('end');
+      return { default: m.ProtocolList };
+    },
+    error => {
+      endTrace('error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    },
+  );
+});
+
+const LazyNFTList = React.lazy(() => {
+  const endTrace = startStartupTraceSpan('home_tab_nft_import');
+
+  return import('./NFTList').then(
+    m => {
+      endTrace('end');
+      return { default: m.NFTList };
+    },
+    error => {
+      endTrace('error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    },
+  );
+});
 
 export const TabsMultiAssets: React.FC<TabMultiAssetsProps> = () => {
   const { styles } = useTheme2024({ getStyle: getStyles });
@@ -115,13 +164,19 @@ export const TabsMultiAssets: React.FC<TabMultiAssetsProps> = () => {
         </TabsTab>
 
         <TabsTab key={TabName.token} name={TabName.token} label={() => null}>
-          <TokenList />
+          <React.Suspense fallback={null}>
+            <LazyTokenList />
+          </React.Suspense>
         </TabsTab>
         <TabsTab key={TabName.defi} name={TabName.defi} label={() => null}>
-          <ProtocolList />
+          <React.Suspense fallback={null}>
+            <LazyProtocolList />
+          </React.Suspense>
         </TabsTab>
         <TabsTab key={TabName.nft} name={TabName.nft} label={() => null}>
-          <NFTList />
+          <React.Suspense fallback={null}>
+            <LazyNFTList />
+          </React.Suspense>
         </TabsTab>
       </TabsContainer>
     </View>

@@ -3,6 +3,11 @@ import { AppState, NativeEventSubscription } from 'react-native';
 import { DEFAULT_AUTO_LOCK_MINUTES } from '@/constant/autoLock';
 import { keyringService, preferenceService } from '../services';
 import { makeEEClass } from './event';
+import { registerDeferredService } from '../services/deferred';
+import {
+  AUTO_LOCK_DEFERRED_SERVICE,
+  type AutoLockDeferredService,
+} from '../services/autoLockDeferred';
 
 const MILLISECS_PER_MIN = 60 * 1e3;
 const MILLISECS_PER_SEC = 1e3;
@@ -239,3 +244,31 @@ export function setupAutoLockChecker() {
     }
   });
 }
+
+registerDeferredService<AutoLockDeferredService>(AUTO_LOCK_DEFERRED_SERVICE, {
+  getPersistedAutoLockTimes,
+  setAutoLockTimeMs(ms) {
+    const times = coerceAutoLockTimeout(ms);
+    preferenceService.setPreference({
+      autoLockTime: times.minutes,
+    });
+    refreshAutolockTimeout();
+    return times;
+  },
+  refreshAutolockTimeout,
+  subscribeTriggerRefresh(listener) {
+    autoLockEvent.addListener('triggerRefresh', listener);
+    return () => {
+      autoLockEvent.removeListener('triggerRefresh', listener);
+    };
+  },
+  subscribeTimeout(listener) {
+    autoLockEvent.addListener('timeout', listener);
+    return () => {
+      autoLockEvent.removeListener('timeout', listener);
+    };
+  },
+  handleUnlock,
+  handleLock,
+  setupAutoLockChecker,
+});

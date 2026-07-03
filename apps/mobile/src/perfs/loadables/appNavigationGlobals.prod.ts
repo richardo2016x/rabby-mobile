@@ -7,6 +7,7 @@ export const DuplicateAddressModal = registerAppScreen<
     import('@/screens/Address/components/DuplicateAddressModal').then(m => ({
       default: m.DuplicateAddressModal,
     })),
+  name: 'DuplicateAddressModal',
 });
 
 export const AliasNameEditModal = registerAppScreen<
@@ -18,6 +19,7 @@ export const AliasNameEditModal = registerAppScreen<
         default: m.AliasNameEditModal,
       }),
     ),
+  name: 'AliasNameEditModal',
 });
 
 export const QrCodeModal = registerAppScreen<
@@ -27,6 +29,7 @@ export const QrCodeModal = registerAppScreen<
     import('@/components2024/QrCodeModal/QrCodeModal').then(m => ({
       default: m.QrCodeModal,
     })),
+  name: 'QrCodeModal',
 });
 
 export const InnerDappWebViewPreloadEntry = registerAppScreen<
@@ -36,6 +39,7 @@ export const InnerDappWebViewPreloadEntry = registerAppScreen<
     import('@/components/WebView/InnerDappWebViewPreloadEntry').then(m => ({
       default: m.InnerDappWebViewPreloadEntry,
     })),
+  name: 'InnerDappWebViewPreloadEntry',
 });
 
 export const ApprovalTokenDetailSheetModalStub = registerAppScreen<
@@ -43,6 +47,7 @@ export const ApprovalTokenDetailSheetModalStub = registerAppScreen<
 >({
   loader: () =>
     import('@/components/TokenDetailPopup/ApprovalTokenDetailSheetModalStub'),
+  name: 'ApprovalTokenDetailSheetModalStub',
 });
 
 export const BottomSheetBrowser = registerAppScreen<
@@ -52,6 +57,7 @@ export const BottomSheetBrowser = registerAppScreen<
     import('@/screens/Browser/BottomSheetBrowser').then(m => ({
       default: m.BottomSheetBrowser,
     })),
+  name: 'BottomSheetBrowser',
 });
 
 export const BrowserManagePopup = registerAppScreen<
@@ -61,6 +67,7 @@ export const BrowserManagePopup = registerAppScreen<
     import('@/screens/Browser/BottomSheetBrowser').then(m => ({
       default: m.BrowserManagePopup,
     })),
+  name: 'BrowserManagePopup',
 });
 
 export const BrowserFavoritePopup = registerAppScreen<
@@ -70,6 +77,7 @@ export const BrowserFavoritePopup = registerAppScreen<
     import('@/screens/Browser/BottomSheetBrowser').then(m => ({
       default: m.BrowserFavoritePopup,
     })),
+  name: 'BrowserFavoritePopup',
 });
 
 export const BottomSheetDappInfoPopup = registerAppScreen<
@@ -79,6 +87,7 @@ export const BottomSheetDappInfoPopup = registerAppScreen<
     import('@/screens/Browser/BottomSheetBrowser').then(m => ({
       default: m.BottomSheetDappInfoPopup,
     })),
+  name: 'BottomSheetDappInfoPopup',
 });
 
 export const ModalsSubmitFeedbackByScreenshotStub = registerAppScreen<
@@ -88,6 +97,7 @@ export const ModalsSubmitFeedbackByScreenshotStub = registerAppScreen<
     import('@/components/Screenshot/ScreenshotModal').then(m => ({
       default: m.ModalsSubmitFeedbackByScreenshotStub,
     })),
+  name: 'ModalsSubmitFeedbackByScreenshotStub',
 });
 
 export const ToggleCollateralModal = registerAppScreen<
@@ -97,12 +107,14 @@ export const ToggleCollateralModal = registerAppScreen<
     import('@/screens/Lending/modals/ToggleCollateralModal').then(m => ({
       default: m.ToggleCollateralModal,
     })),
+  name: 'ToggleCollateralModal',
 });
 
 export const GlobalSecurityTipStubModal = registerAppScreen<
   typeof import('@/components/Security/SecurityTipStubModal').default
 >({
   loader: () => import('@/components/Security/SecurityTipStubModal'),
+  name: 'GlobalSecurityTipStubModal',
 });
 
 export const BackgroundSecureBlurView = registerAppScreen<
@@ -112,6 +124,7 @@ export const BackgroundSecureBlurView = registerAppScreen<
     import('@/components/customized/BackgroundSecureBlurView').then(m => ({
       default: m.BackgroundSecureBlurView,
     })),
+  name: 'BackgroundSecureBlurView',
 });
 
 export const FloatingDiagnosticsPanel = registerAppScreen<
@@ -123,6 +136,7 @@ export const FloatingDiagnosticsPanel = registerAppScreen<
         default: m.FloatingDiagnosticsPanel,
       }),
     ),
+  name: 'FloatingDiagnosticsPanel',
 });
 
 export const WideScreenDebugPanel = registerAppScreen<
@@ -132,6 +146,7 @@ export const WideScreenDebugPanel = registerAppScreen<
     import('@/components/Debug/WideScreenDebugPanel').then(m => ({
       default: m.WideScreenDebugPanel,
     })),
+  name: 'WideScreenDebugPanel',
 });
 
 export const GlobalMiniApproval = registerAppScreen<
@@ -143,6 +158,7 @@ export const GlobalMiniApproval = registerAppScreen<
     ).then(m => ({
       default: m.GlobalMiniApproval,
     })),
+  name: 'GlobalMiniApproval',
 });
 
 export const GlobalMiniSignTypedDataPortal = registerAppScreen<
@@ -154,6 +170,7 @@ export const GlobalMiniSignTypedDataPortal = registerAppScreen<
     ).then(m => ({
       default: m.GlobalMiniSignTypedDataPortal,
     })),
+  name: 'GlobalMiniSignTypedDataPortal',
 });
 
 export const GlobalTipsPopup = registerAppScreen<
@@ -163,6 +180,7 @@ export const GlobalTipsPopup = registerAppScreen<
     import('@/components2024/GlobalTipsPopup').then(m => ({
       default: m.GlobalTipsPopup,
     })),
+  name: 'GlobalTipsPopup',
 });
 
 export const GlobalSignerPortal = registerAppScreen<
@@ -174,6 +192,7 @@ export const GlobalSignerPortal = registerAppScreen<
         default: m.GlobalSignerPortal,
       }),
     ),
+  name: 'GlobalSignerPortal',
 });
 
 export const WalletConnectModalHost = registerAppScreen<
@@ -183,4 +202,5 @@ export const WalletConnectModalHost = registerAppScreen<
     import('@/components2024/WalletConnect/WalletConnectModalHost').then(m => ({
       default: m.WalletConnectModalHost,
     })),
+  name: 'WalletConnectModalHost',
 });
