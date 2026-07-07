@@ -11,7 +11,7 @@ import {
   MaterialTabBar,
   Tabs,
   useFocusedTab,
-} from 'react-native-collapsible-tab-view';
+} from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 

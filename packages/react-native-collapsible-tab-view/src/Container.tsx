@@ -1,11 +1,8 @@
 import React from 'react'
-import {
-  LayoutChangeEvent,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native'
-import PagerView from 'react-native-pager-view'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
+import PagerView, {
+  type PageScrollStateChangedNativeEvent,
+} from 'react-native-pager-view'
 import Animated, {
   runOnJS,
   runOnUI,
@@ -15,6 +12,7 @@ import Animated, {
   useSharedValue,
   withDelay,
   withTiming,
+  useFrameCallback,
 } from 'react-native-reanimated'
 
 import { Context, TabNameContext } from './Context'
@@ -27,6 +25,7 @@ import {
   useContainerRef,
   usePageScrollHandler,
   useTabProps,
+  useLayoutHeight,
 } from './hooks'
 import {
   CollapsibleProps,
@@ -38,11 +37,16 @@ import {
 
 const AnimatedPagerView = Animated.createAnimatedComponent(PagerView)
 
+type PagerSelection = {
+  index: number
+  transitionId: number
+}
+
 /**
  * Basic usage looks like this:
  *
  * ```tsx
- * import { Tabs } from 'react-native-collapsible-tab-view'
+ * import { Tabs } from @rabby-wallet/react-native-collapsible-tab-view
  *
  * const Example = () => {
  *   return (
@@ -75,6 +79,7 @@ export const Container = React.memo(
         cancelTranslation,
         containerStyle,
         lazy,
+        lazyPreloadDistance = 0,
         cancelLazyFadeIn,
         pagerProps,
         onIndexChange,
@@ -93,25 +98,29 @@ export const Container = React.memo(
       const windowWidth = useWindowDimensions().width
       const width = customWidth ?? windowWidth
 
-      const containerHeight = useSharedValue<number | undefined>(undefined)
+      const [containerHeight, getContainerLayoutHeight] = useLayoutHeight()
 
-      const tabBarHeight = useSharedValue<number | undefined>(
-        initialTabBarHeight
-      )
+      const [tabBarHeight, getTabBarHeight] =
+        useLayoutHeight(initialTabBarHeight)
 
-      const headerHeight = useSharedValue<number | undefined>(
+      const [headerHeight, getHeaderHeight] = useLayoutHeight(
         !renderHeader ? 0 : initialHeaderHeight
       )
+      const initialIndex = React.useMemo(
+        () =>
+          initialTabName
+            ? tabNamesArray.findIndex((n) => n === initialTabName)
+            : 0,
+        [initialTabName, tabNamesArray]
+      )
 
-      const contentInset = useDerivedValue(() => {
+      const contentInset = React.useMemo(() => {
         if (allowHeaderOverscroll) return 0
 
         // necessary for the refresh control on iOS to be positioned underneath the header
         // this also adjusts the scroll bars to clamp underneath the header area
-        return IS_IOS
-          ? (headerHeight.value || 0) + (tabBarHeight.value || 0)
-          : 0
-      })
+        return IS_IOS ? (headerHeight || 0) + (tabBarHeight || 0) : 0
+      }, [headerHeight, tabBarHeight, allowHeaderOverscroll])
 
       const snappingTo: ContextType['snappingTo'] = useSharedValue(0)
       const offset: ContextType['offset'] = useSharedValue(0)
@@ -120,7 +129,7 @@ export const Container = React.memo(
       const accDiffClamp: ContextType['accDiffClamp'] = useSharedValue(0)
       const scrollYCurrent: ContextType['scrollYCurrent'] = useSharedValue(0)
       const scrollY: ContextType['scrollY'] = useSharedValue(
-        tabNamesArray.map(() => 0)
+        Object.fromEntries(tabNamesArray.map((n) => [n, 0]))
       )
 
       const contentHeights: ContextType['contentHeights'] = useSharedValue(
@@ -131,31 +140,44 @@ export const Container = React.memo(
         () => tabNamesArray,
         [tabNamesArray]
       )
-      const index: ContextType['index'] = useSharedValue(
-        initialTabName
-          ? tabNames.value.findIndex((n) => n === initialTabName)
-          : 0
-      )
+      const index: ContextType['index'] = useSharedValue(initialIndex)
 
-      const [data, setData] = React.useState(tabNamesArray)
-
-      React.useEffect(() => {
-        setData(tabNamesArray)
-      }, [tabNamesArray])
-
-      const focusedTab: ContextType['focusedTab'] = useDerivedValue<TabName>(() => {
-        return tabNames.value[index.value]
-      }, [tabNames])
-      const calculateNextOffset = useSharedValue(index.value)
-      const headerScrollDistance: ContextType['headerScrollDistance'] = useDerivedValue(() => {
-        return headerHeight.value !== undefined
-          ? headerHeight.value - minHeaderHeight
-          : 0
-      }, [headerHeight, minHeaderHeight])
+      const focusedTab: ContextType['focusedTab'] =
+        useDerivedValue<TabName>(() => {
+          return tabNames.value[index.value]
+        }, [tabNames])
+      const calculateNextOffset = useSharedValue(initialIndex)
+      const headerScrollDistance: ContextType['headerScrollDistance'] =
+        useDerivedValue(() => {
+          return headerHeight !== undefined ? headerHeight - minHeaderHeight : 0
+        }, [headerHeight, minHeaderHeight])
 
       const indexDecimal: ContextType['indexDecimal'] = useSharedValue(
         index.value
       )
+      const visualFocusedTab: ContextType['visualFocusedTab'] =
+        useDerivedValue<TabName>(() => {
+          const names = tabNames.value
+          if (!names.length) {
+            return focusedTab.value
+          }
+
+          const visualIndex = Math.min(
+            Math.max(Math.round(indexDecimal.value), 0),
+            names.length - 1
+          )
+          return names[visualIndex] ?? focusedTab.value
+        }, [focusedTab, tabNames])
+      const pagerIsIdle: ContextType['pagerIsIdle'] = useSharedValue(true)
+      const committedIndexRef = React.useRef(initialIndex)
+      const commandedIndexRef = React.useRef<number | null>(null)
+      const transitionIdRef = React.useRef(0)
+      const pendingSelectedIndexRef = React.useRef<PagerSelection | null>(null)
+      const idleCommitFrameRef = React.useRef<number | null>(null)
+      const pagerScrollStateRef =
+        React.useRef<
+          PageScrollStateChangedNativeEvent['nativeEvent']['pageScrollState']
+        >('idle')
 
       const afterRender = useSharedValue(0)
       React.useEffect(() => {
@@ -167,11 +189,13 @@ export const Container = React.memo(
 
       const resyncTabScroll = () => {
         'worklet'
+        if (!pagerIsIdle.value) return
+
         for (const name of tabNamesArray) {
           scrollToImpl(
             refMap[name],
             0,
-            scrollYCurrent.value - contentInset.value,
+            scrollYCurrent.value - contentInset,
             false
           )
         }
@@ -191,24 +215,6 @@ export const Container = React.memo(
         [tabNamesArray, refMap, afterRender, contentInset]
       )
 
-      // derived from scrollX
-      // calculate the next offset and index if swiping
-      // if scrollX changes from tab press,
-      // the same logic must be done, but knowing
-      // the next index in advance
-      useAnimatedReaction(
-        () => {
-          const nextIndex = Math.round(indexDecimal.value)
-          return nextIndex
-        },
-        (nextIndex) => {
-          if (nextIndex !== null && nextIndex !== index.value) {
-            calculateNextOffset.value = nextIndex
-          }
-        },
-        []
-      )
-
       const propagateTabChange = React.useCallback(
         (change: IndexChangeEventData<TabName>) => {
           onTabChange?.(change)
@@ -217,6 +223,47 @@ export const Container = React.memo(
         [onIndexChange, onTabChange]
       )
 
+      const syncCurrentTabScrollPosition = () => {
+        'worklet'
+        if (!pagerIsIdle.value) return
+
+        const name = tabNamesArray[index.value]
+        scrollToImpl(
+          refMap[name],
+          0,
+          scrollYCurrent.value - contentInset,
+          false
+        )
+      }
+
+      /*
+       * We run syncCurrentTabScrollPosition in every frame after the index
+       * changes for about 1500ms because the Lists can be late to accept the
+       * scrollTo event we send. This fixes the issue of the scroll position
+       * jumping when the user changes tab.
+       * */
+      const toggleSyncScrollFrame = (toggle: boolean) => {
+        if (toggle && pagerScrollStateRef.current !== 'idle') return
+        syncScrollFrame.setActive(toggle)
+      }
+      const cancelIdleCommitFrame = React.useCallback(() => {
+        if (idleCommitFrameRef.current === null) return
+
+        cancelAnimationFrame(idleCommitFrameRef.current)
+        idleCommitFrameRef.current = null
+      }, [])
+      const syncScrollFrame = useFrameCallback(({ timeSinceFirstFrame }) => {
+        if (!pagerIsIdle.value) {
+          runOnJS(toggleSyncScrollFrame)(false)
+          return
+        }
+
+        syncCurrentTabScrollPosition()
+        if (timeSinceFirstFrame > 1500) {
+          runOnJS(toggleSyncScrollFrame)(false)
+        }
+      }, false)
+
       useAnimatedReaction(
         () => {
           return calculateNextOffset.value
@@ -224,7 +271,9 @@ export const Container = React.memo(
         (i) => {
           if (i !== index.value) {
             offset.value =
-              scrollY.value[index.value] - scrollY.value[i] + offset.value
+              scrollY.value[tabNames.value[index.value]] -
+              scrollY.value[tabNames.value[i]] +
+              offset.value
             runOnJS(propagateTabChange)({
               prevIndex: index.value,
               index: i,
@@ -232,14 +281,20 @@ export const Container = React.memo(
               tabName: tabNames.value[i],
             })
             index.value = i
-            scrollYCurrent.value = scrollY.value[index.value] || 0
+            if (
+              typeof scrollY.value[tabNames.value[index.value]] === 'number'
+            ) {
+              scrollYCurrent.value =
+                scrollY.value[tabNames.value[index.value]] || 0
+            }
+            runOnJS(toggleSyncScrollFrame)(true)
           }
         },
         []
       )
 
       useAnimatedReaction(
-        () => headerHeight.value,
+        () => headerHeight,
         (_current, prev) => {
           if (prev === undefined) {
             // sync scroll if we started with undefined header height
@@ -264,45 +319,29 @@ export const Container = React.memo(
         }
       }, [revealHeaderOnScroll])
 
-      const getHeaderHeight = React.useCallback(
-        (event: LayoutChangeEvent) => {
-          const height = event.nativeEvent.layout.height
-          if (headerHeight.value !== height) {
-            headerHeight.value = height
-          }
-        },
-        [headerHeight]
-      )
-
-      const getTabBarHeight = React.useCallback(
-        (event: LayoutChangeEvent) => {
-          const height = event.nativeEvent.layout.height
-          if (tabBarHeight.value !== height) tabBarHeight.value = height
-        },
-        [tabBarHeight]
-      )
-
-      const onLayout = React.useCallback(
-        (event: LayoutChangeEvent) => {
-          const height = event.nativeEvent.layout.height
-          if (containerHeight.value !== height) containerHeight.value = height
-        },
-        [containerHeight]
-      )
-
       const onTabPress = React.useCallback(
         (name: TabName) => {
           const i = tabNames.value.findIndex((n) => n === name)
+          if (i < 0) return
 
-          if (name === focusedTab.value) {
+          if (
+            i === committedIndexRef.current &&
+            pagerScrollStateRef.current === 'idle'
+          ) {
             const ref = refMap[name]
             runOnUI(scrollToImpl)(
               ref,
               0,
-              headerScrollDistance.value - contentInset.value,
+              headerScrollDistance.value - contentInset,
               true
             )
           } else {
+            transitionIdRef.current += 1
+            pagerIsIdle.value = false
+            toggleSyncScrollFrame(false)
+            cancelIdleCommitFrame()
+            commandedIndexRef.current = i
+            pendingSelectedIndexRef.current = null
             containerRef.current?.setPage(i)
           }
         },
@@ -310,11 +349,136 @@ export const Container = React.memo(
         [containerRef, refMap, contentInset]
       )
 
-      React.useEffect(() => {
-        if (index.value >= tabNamesArray.length) {
-          onTabPress(tabNamesArray[tabNamesArray.length - 1])
+      const clampPagerIndex = React.useCallback(
+        (rawIndex: number) => {
+          const maxIndex = Math.max(0, tabNamesArray.length - 1)
+          return Math.min(Math.max(Math.round(rawIndex), 0), maxIndex)
+        },
+        [tabNamesArray.length]
+      )
+
+      const commitPagerIndex = React.useCallback(
+        (rawIndex: number) => {
+          const nextIndex = clampPagerIndex(rawIndex)
+          committedIndexRef.current = nextIndex
+          indexDecimal.value = nextIndex
+          calculateNextOffset.value = nextIndex
+          return nextIndex
+        },
+        [calculateNextOffset, clampPagerIndex, indexDecimal]
+      )
+
+      const commitPendingPagerIndex = React.useCallback(
+        (expectedTransitionId?: number) => {
+          if (pagerScrollStateRef.current !== 'idle') return
+
+          const pendingSelection = pendingSelectedIndexRef.current
+          if (
+            pendingSelection &&
+            expectedTransitionId !== undefined &&
+            pendingSelection.transitionId !== expectedTransitionId
+          ) {
+            return
+          }
+
+          const visualIndex = clampPagerIndex(indexDecimal.value)
+          const targetIndex = pendingSelection?.index ?? visualIndex
+          const commandedIndex = commandedIndexRef.current
+          const selectedLooksStale =
+            pendingSelection !== null &&
+            commandedIndex === null &&
+            visualIndex !== pendingSelection.index
+
+          commitPagerIndex(selectedLooksStale ? visualIndex : targetIndex)
+          commandedIndexRef.current = null
+          pendingSelectedIndexRef.current = null
+        },
+        [clampPagerIndex, commitPagerIndex, indexDecimal]
+      )
+
+      const schedulePendingPagerIndexCommit = React.useCallback(
+        (expectedTransitionId?: number) => {
+          cancelIdleCommitFrame()
+          idleCommitFrameRef.current = requestAnimationFrame(() => {
+            idleCommitFrameRef.current = null
+            commitPendingPagerIndex(expectedTransitionId)
+          })
+        },
+        [cancelIdleCommitFrame, commitPendingPagerIndex]
+      )
+
+      const handlePageSelected = React.useCallback<
+        NonNullable<NonNullable<typeof pagerProps>['onPageSelected']>
+      >(
+        (event) => {
+          pagerProps?.onPageSelected?.(event)
+          const selectedIndex = clampPagerIndex(event.nativeEvent.position)
+          const commandedIndex = commandedIndexRef.current
+
+          if (pagerScrollStateRef.current === 'dragging') {
+            return
+          }
+
+          if (commandedIndex !== null && selectedIndex !== commandedIndex) {
+            return
+          }
+
+          const transitionId = transitionIdRef.current
+          pendingSelectedIndexRef.current = {
+            index: selectedIndex,
+            transitionId,
+          }
+          if (pagerScrollStateRef.current === 'idle') {
+            schedulePendingPagerIndexCommit(transitionId)
+          }
+        },
+        [clampPagerIndex, pagerProps, schedulePendingPagerIndexCommit]
+      )
+
+      const handlePageScrollStateChanged = React.useCallback<
+        NonNullable<NonNullable<typeof pagerProps>['onPageScrollStateChanged']>
+      >(
+        (event) => {
+          pagerProps?.onPageScrollStateChanged?.(event)
+          const state = event.nativeEvent.pageScrollState
+          pagerScrollStateRef.current = state
+          pagerIsIdle.value = state === 'idle'
+
+          if (state === 'dragging') {
+            transitionIdRef.current += 1
+            toggleSyncScrollFrame(false)
+            cancelIdleCommitFrame()
+            commandedIndexRef.current = null
+            pendingSelectedIndexRef.current = null
+            return
+          }
+
+          if (state === 'settling') {
+            toggleSyncScrollFrame(false)
+            cancelIdleCommitFrame()
+            return
+          }
+
+          if (state === 'idle') {
+            schedulePendingPagerIndexCommit()
+          }
+        },
+        [
+          cancelIdleCommitFrame,
+          pagerIsIdle,
+          pagerProps,
+          schedulePendingPagerIndexCommit,
+        ]
+      )
+
+      useAnimatedReaction(
+        () => tabNamesArray.length,
+        (tabLength) => {
+          if (index.value >= tabLength) {
+            runOnJS(onTabPress)(tabNamesArray[tabLength - 1])
+          }
         }
-      }, [index.value, onTabPress, tabNamesArray])
+      )
 
       const pageScrollHandler = usePageScrollHandler({
         onPageScroll: (e) => {
@@ -329,6 +493,29 @@ export const Container = React.memo(
           setIndex: (index) => {
             const name = tabNames.value[index]
             onTabPress(name)
+            return true
+          },
+          settleToIndex: (index) => {
+            const nextIndex = clampPagerIndex(index)
+            transitionIdRef.current += 1
+            pagerIsIdle.value = false
+            commandedIndexRef.current = nextIndex
+            pendingSelectedIndexRef.current = {
+              index: nextIndex,
+              transitionId: transitionIdRef.current,
+            }
+            toggleSyncScrollFrame(false)
+            cancelIdleCommitFrame()
+            const pager = containerRef.current as
+              | (typeof containerRef.current & {
+                  setPageWithoutAnimation?: (index: number) => void
+                })
+              | null
+            if (pager?.setPageWithoutAnimation) {
+              pager.setPageWithoutAnimation(nextIndex)
+            } else {
+              pager?.setPage(nextIndex)
+            }
             return true
           },
           jumpToTab: (name) => {
@@ -358,6 +545,8 @@ export const Container = React.memo(
             snapThreshold,
             revealHeaderOnScroll,
             focusedTab,
+            visualFocusedTab,
+            pagerIsIdle,
             accDiffClamp,
             indexDecimal,
             containerHeight,
@@ -378,7 +567,7 @@ export const Container = React.memo(
         >
           <Animated.View
             style={[styles.container, { width }, containerStyle]}
-            onLayout={onLayout}
+            onLayout={getContainerLayoutHeight}
             pointerEvents="box-none"
           >
             <Animated.View
@@ -426,18 +615,25 @@ export const Container = React.memo(
 
             <AnimatedPagerView
               ref={containerRef}
-              onPageScroll={pageScrollHandler}
-              initialPage={index.value}
+              initialPage={initialIndex}
               {...pagerProps}
+              onPageScroll={pageScrollHandler}
+              onPageSelected={handlePageSelected}
+              onPageScrollStateChanged={handlePageScrollStateChanged}
               style={[pagerProps?.style, StyleSheet.absoluteFill]}
             >
-              {data.map((tabName, i) => {
+              {tabNamesArray.map((tabName, i) => {
                 return (
-                  <View key={i}>
+                  <View key={i} style={styles.pageContainer}>
                     <TabNameContext.Provider value={tabName}>
                       <Lazy
                         startMounted={lazy ? undefined : true}
                         cancelLazyFadeIn={!lazy ? true : !!cancelLazyFadeIn}
+                        preloadDistance={lazy ? lazyPreloadDistance : 0}
+                        indexDecimal={indexDecimal}
+                        tabIndex={i}
+                        // ensure that we remount the tab if its name changes but the index doesn't
+                        key={tabName}
                       >
                         {
                           React.Children.toArray(children)[
@@ -460,6 +656,10 @@ export const Container = React.memo(
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  pageContainer: {
+    height: '100%',
+    width: '100%',
   },
   topContainer: {
     position: 'absolute',

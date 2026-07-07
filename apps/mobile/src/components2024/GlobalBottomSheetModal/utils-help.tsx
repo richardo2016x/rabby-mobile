@@ -1,9 +1,10 @@
-import { AppBottomSheetModal } from '@/components/customized/BottomSheet';
-import { AppColors2024Variants } from '@/constant/theme';
-import React from 'react';
+import type { AppBottomSheetModal } from '@/components/customized/BottomSheet';
+import type { AppColors2024Variants } from '@/constant/theme';
+import type React from 'react';
 import { StyleSheet } from 'react-native';
 import { BackgroundComponent } from './BackgroundComponent';
-import { CreateParams, MODAL_NAMES } from './types';
+import { MODAL_NAMES } from './types';
+import type { CreateParams } from './types';
 
 export function makeBottomSheetProps({
   colors,

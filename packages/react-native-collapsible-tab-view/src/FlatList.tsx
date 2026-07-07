@@ -1,13 +1,11 @@
 import React from 'react'
 import { FlatList as RNFlatList, FlatListProps } from 'react-native'
-import type { SharedValue } from 'react-native-reanimated'
 
 import { AnimatedFlatList } from './helpers'
 import {
   useAfterMountEffect,
   useChainCallback,
   useCollapsibleStyle,
-  useConvertAnimatedToValue,
   useScrollHandlerY,
   useSharedAnimatedRef,
   useTabNameContext,
@@ -15,8 +13,8 @@ import {
   useUpdateScrollViewContentSize,
 } from './hooks'
 
-type CollapsibleFlatListProps<T> = FlatListProps<T> & {
-  pullDownDistance?: SharedValue<number>
+type ExtraFlatListProps = {
+  pullDownDistance?: unknown
 }
 
 /**
@@ -37,18 +35,16 @@ function FlatListImpl<R>(
     style,
     onContentSizeChange,
     refreshControl,
-    pullDownDistance,
+    pullDownDistance: _pullDownDistance,
     ...rest
-  }: Omit<CollapsibleFlatListProps<R>, 'onScroll'>,
+  }: Omit<FlatListProps<R>, 'onScroll'> & ExtraFlatListProps,
   passRef: React.Ref<RNFlatList>
 ): React.ReactElement {
   const name = useTabNameContext()
   const { setRef, contentInset } = useTabsContext()
   const ref = useSharedAnimatedRef<RNFlatList<unknown>>(passRef)
 
-  const { scrollHandler, enable } = useScrollHandlerY(name, {
-    pullDownDistance,
-  })
+  const { scrollHandler, enable } = useScrollHandlerY(name)
   const onLayout = useAfterMountEffect(rest.onLayout, () => {
     'worklet'
     // we enable the scroll event after mounting
@@ -71,10 +67,10 @@ function FlatListImpl<R>(
   })
 
   const scrollContentSizeChangeHandlers = useChainCallback(
-    React.useMemo(() => [scrollContentSizeChange, onContentSizeChange], [
-      onContentSizeChange,
-      scrollContentSizeChange,
-    ])
+    React.useMemo(
+      () => [scrollContentSizeChange, onContentSizeChange],
+      [onContentSizeChange, scrollContentSizeChange]
+    )
   )
 
   const memoRefreshControl = React.useMemo(
@@ -87,15 +83,14 @@ function FlatListImpl<R>(
     [progressViewOffset, refreshControl]
   )
 
-  const contentInsetValue = useConvertAnimatedToValue(contentInset)
-
-  const memoContentInset = React.useMemo(() => ({ top: contentInsetValue }), [
-    contentInsetValue,
-  ])
+  const memoContentInset = React.useMemo(
+    () => ({ top: contentInset }),
+    [contentInset]
+  )
 
   const memoContentOffset = React.useMemo(
-    () => ({ x: 0, y: -contentInsetValue }),
-    [contentInsetValue]
+    () => ({ x: 0, y: -contentInset }),
+    [contentInset]
   )
 
   const memoContentContainerStyle = React.useMemo(
@@ -135,5 +130,5 @@ function FlatListImpl<R>(
  * Use like a regular FlatList.
  */
 export const FlatList = React.forwardRef(FlatListImpl) as <T>(
-  p: CollapsibleFlatListProps<T> & { ref?: React.Ref<RNFlatList<T>> }
+  p: FlatListProps<T> & ExtraFlatListProps & { ref?: React.Ref<RNFlatList<T>> }
 ) => React.ReactElement

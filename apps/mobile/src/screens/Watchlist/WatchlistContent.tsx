@@ -7,7 +7,7 @@ import {
   View,
   ViewToken,
 } from 'react-native';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 
 import { Button } from '@/components2024/Button';
 import { Text } from '@/components/Typography';
@@ -28,7 +28,7 @@ import { createGetStyles2024 } from '@/utils/styles';
 import { tokenItemToITokenItem } from '@/utils/token';
 import { useFocusEffect } from '@react-navigation/native';
 import { TokenDetailWithPriceCurve } from '@rabby-wallet/rabby-api/dist/types';
-import { useFocusedTab } from 'react-native-collapsible-tab-view';
+import { useFocusedTab } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useTranslation } from 'react-i18next';
 
 import { WatchlistCheckbox } from './components/Checkbox';
@@ -360,7 +360,6 @@ export function WatchlistContent({
         <Tabs.ScrollView
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}
-          tvParallaxProperties={undefined}
           horizontal={false}
           nestedScrollEnabled={false}
           style={styles.scrollView}

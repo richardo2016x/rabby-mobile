@@ -4,7 +4,7 @@ import { CollapsibleProps, CollapsibleRef } from './types';
  * Basic usage looks like this:
  *
  * ```tsx
- * import { Tabs } from 'react-native-collapsible-tab-view'
+ * import { Tabs } from @rabby-wallet/react-native-collapsible-tab-view
  *
  * const Example = () => {
  *   return (

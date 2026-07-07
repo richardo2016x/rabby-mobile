@@ -56,7 +56,7 @@ import {
 import { RightMore } from './components/RightMore';
 import HeaderBalanceCard from './components/HeaderBalanceCard';
 import { navigateDeprecated } from '@/utils/navigation';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { DynamicCustomMaterialTabBar } from './components/CustomTabBar';
 import CustomLabel from './components/CustomLabel';
 import { CandlePeriod } from '@/components2024/TradingViewCandleChart/type';

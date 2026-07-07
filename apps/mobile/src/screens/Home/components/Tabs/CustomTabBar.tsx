@@ -4,7 +4,7 @@ import {
   MaterialTabBar,
   MaterialTabBarProps,
   MaterialTabItem,
-} from 'react-native-collapsible-tab-view';
+} from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { getAddrChainInfo, useAddrTop3Chains } from '../../useChainInfo';
 import { ChainSelector } from '../AssetRenderItems/SectionHeaders';
 import {

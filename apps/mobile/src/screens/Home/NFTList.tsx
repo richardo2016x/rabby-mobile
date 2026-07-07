@@ -36,7 +36,7 @@ import {
   Tabs,
   useCurrentTabScrollY,
   useFocusedTab,
-} from 'react-native-collapsible-tab-view';
+} from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useIsFocused } from '@react-navigation/native';
 import { useAnimatedReaction } from 'react-native-reanimated';
 import { runOnJS } from 'react-native-reanimated';

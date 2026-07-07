@@ -22,7 +22,7 @@ import { RcIconScannerCC } from '@/assets/icons/address';
 import TouchableView from '@/components/Touchable/TouchableView';
 import { Button } from '@/components2024/Button';
 import { toast, toastLoadingSuccess } from '@/components2024/Toast';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import {
   requestBindDevice,
   useNotificationDevLogsStore,
@@ -518,7 +518,6 @@ function DevUINotifications(): JSX.Element {
         }}>
         <Tabs.Tab name="toast" label={'Toast'}>
           <Tabs.ScrollView
-            tvParallaxProperties={undefined}
             nestedScrollEnabled={false}
             contentContainerStyle={styles.screenScrollableView}
             horizontal={false}>
@@ -527,7 +526,6 @@ function DevUINotifications(): JSX.Element {
         </Tabs.Tab>
         <Tabs.Tab name="notifications" label={'Notifications'}>
           <Tabs.ScrollView
-            tvParallaxProperties={undefined}
             nestedScrollEnabled={false}
             contentContainerStyle={styles.screenScrollableView}
             horizontal={false}>

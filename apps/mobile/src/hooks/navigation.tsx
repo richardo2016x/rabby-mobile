@@ -49,7 +49,7 @@ import {
 import { RefLikeObject } from '@/utils/type';
 import { perfEvents } from '@/core/utils/perf';
 import { useShallow } from 'zustand/react/shallow';
-import { CollapsibleRef } from 'react-native-collapsible-tab-view';
+import { CollapsibleRef } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { autoLockEvent } from '@/core/apis/autoLock';
 import { notificationEvents } from '@/core/notifications/data';
 import {

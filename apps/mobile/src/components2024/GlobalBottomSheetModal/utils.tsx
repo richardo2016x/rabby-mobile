@@ -1,4 +1,5 @@
-import { GlobalBottomSheetModalProps, MODAL_NAMES } from './types';
+import { MODAL_NAMES } from './types';
+import type { GlobalBottomSheetModalProps } from './types';
 import { Approval } from '@/components//Approval';
 import { SwitchAddress } from '@/components/CommonPopup/SwitchAddress';
 import { SwitchChain } from '@/components/CommonPopup/SwitchChain';

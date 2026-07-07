@@ -13,7 +13,7 @@ import { createGetStyles2024 } from '@/utils/styles';
 import { memeItemToITokenItem } from '@/utils/token';
 import { TokenMarketTokenItem } from '@rabby-wallet/rabby-api/dist/types';
 import { useAtom } from 'jotai';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useTranslation } from 'react-i18next';
 
 import TokenHeader, { SortState } from '../../Meme/components/TokenHeader';

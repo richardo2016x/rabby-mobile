@@ -1,4 +1,5 @@
-import { EVENT_NAMES, MODAL_ID } from './types';
+import { EVENT_NAMES } from './types';
+import type { MODAL_ID } from './types';
 import { globalSheetModalEvents } from './event';
 import { apisAppWin2024 } from '@/core/services2024/appWin';
 import { keyringService } from '@/core/services/shared';

@@ -56,6 +56,7 @@ const appSingletonPackages = [
   'react',
   'react-native',
   'react-native-gesture-handler',
+  'react-native-pager-view',
   'react-native-reanimated',
 ];
 const isAppSingletonModule = moduleName =>

@@ -1,6 +1,6 @@
 import { MutableRefObject, DependencyList } from 'react';
 import { LayoutChangeEvent, ViewProps } from 'react-native';
-import { RefComponent } from 'react-native-collapsible-tab-view';
+import { RefComponent } from '@rabby-wallet/react-native-collapsible-tab-view';
 import { PagerViewOnPageScrollEvent } from 'react-native-pager-view';
 import Animated from 'react-native-reanimated';
 import { CollapsibleStyle, ContextType, TabName, TabReactElement, TabsWithProps, Ref } from './types';

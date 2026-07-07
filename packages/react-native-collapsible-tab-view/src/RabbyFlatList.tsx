@@ -1,84 +1,71 @@
-import React, { type Ref } from 'react';
-import { FlatList as RNGHFlatList } from 'react-native-gesture-handler';
-import Animated from 'react-native-reanimated';
+import React from 'react'
+import { FlatList as RNGHFlatList } from 'react-native-gesture-handler'
+import Animated from 'react-native-reanimated'
 
 import {
   useAfterMountEffect,
   useChainCallback,
   useCollapsibleStyle,
-  useConvertAnimatedToValue,
+  useScrollHandlerY,
   useSharedAnimatedRef,
   useTabNameContext,
   useTabsContext,
   useUpdateScrollViewContentSize,
-} from './hooks';
-import { useScrollHandlerY } from './RabbyHooks';
+} from './hooks'
 
-type RNGHFlatListProps<T> = React.ComponentProps<typeof RNGHFlatList<T>>;
+type RNGHFlatListProps<T> = React.ComponentProps<typeof RNGHFlatList<T>>
 const AnimatedRNGHFlatList =
-  Animated.createAnimatedComponent<RNGHFlatListProps<any>>(RNGHFlatList);
+  Animated.createAnimatedComponent<RNGHFlatListProps<any>>(RNGHFlatList)
 
-const FinalView = AnimatedRNGHFlatList;
-type FinalProps<T> = RNGHFlatListProps<T>;
-type FinalType<T> = RNGHFlatList<T>;
+type FinalProps<T> = RNGHFlatListProps<T>
+type FinalType<T> = RNGHFlatList<T>
 
-/**
- * Used as a memo to prevent rerendering too often when the context changes.
- * See: https://github.com/facebook/react/issues/15156#issuecomment-474590693
- */
 const FlatListMemo = React.memo(
-  ({
-    ref,
-    ...props
-  }: React.PropsWithChildren<FinalProps<unknown>> & {
-    ref?: Ref<FinalType<unknown>>;
-  }) => {
-    return <FinalView ref={ref} {...props} />;
-  },
-);
+  React.forwardRef<FinalType<unknown>, React.PropsWithChildren<FinalProps<unknown>>>(
+    (props, passRef) => {
+      return <AnimatedRNGHFlatList ref={passRef} {...props} />
+    }
+  )
+)
 
-function RabbyFlatList<R>({
-  contentContainerStyle,
-  style,
-  onContentSizeChange,
-  refreshControl,
-  ref,
-  ...rest
-}: Omit<FinalProps<R>, 'onScroll'> & {
-  ref?: Ref<FinalType<R>>;
-}): React.ReactElement<any> {
-  const name = useTabNameContext();
-  const { setRef, contentInset } = useTabsContext();
-  const innerRef = useSharedAnimatedRef<FinalType<R>>(ref ?? null);
+function RabbyFlatListImpl<R>(
+  {
+    contentContainerStyle,
+    style,
+    onContentSizeChange,
+    refreshControl,
+    ...rest
+  }: Omit<FinalProps<R>, 'onScroll'>,
+  passRef: React.Ref<FinalType<R>>
+): React.ReactElement {
+  const name = useTabNameContext()
+  const { setRef, contentInset } = useTabsContext()
+  const innerRef = useSharedAnimatedRef<any>(passRef as any)
 
-  const { scrollHandler, enable } = useScrollHandlerY(name);
+  const { scrollHandler, enable } = useScrollHandlerY(name)
   const onLayout = useAfterMountEffect(rest.onLayout, () => {
-    'worklet';
-    // we enable the scroll event after mounting
-    // otherwise we get an `onScroll` call with the initial scroll position which can break things
-    enable(true);
-  });
+    'worklet'
+    enable(true)
+  })
 
   const {
     style: _style,
     contentContainerStyle: _contentContainerStyle,
     progressViewOffset,
-  } = useCollapsibleStyle();
+  } = useCollapsibleStyle()
 
   React.useEffect(() => {
-    setRef(name, innerRef);
-  }, [name, innerRef, setRef]);
+    setRef(name, innerRef as any)
+  }, [name, innerRef, setRef])
 
-  const scrollContentSizeChange = useUpdateScrollViewContentSize({
-    name,
-  });
+  const scrollContentSizeChange = useUpdateScrollViewContentSize({ name })
 
   const scrollContentSizeChangeHandlers = useChainCallback(
     React.useMemo(
       () => [scrollContentSizeChange, onContentSizeChange],
-      [onContentSizeChange, scrollContentSizeChange],
-    ),
-  );
+      [onContentSizeChange, scrollContentSizeChange]
+    )
+  )
 
   const memoRefreshControl = React.useMemo(
     () =>
@@ -87,36 +74,30 @@ function RabbyFlatList<R>({
         progressViewOffset,
         ...refreshControl.props,
       }),
-    [progressViewOffset, refreshControl],
-  );
-
-  const contentInsetValue = useConvertAnimatedToValue(contentInset);
+    [progressViewOffset, refreshControl]
+  )
 
   const memoContentInset = React.useMemo(
-    () => ({ top: contentInsetValue }),
-    [contentInsetValue],
-  );
+    () => ({ top: contentInset }),
+    [contentInset]
+  )
 
   const memoContentOffset = React.useMemo(
-    () => ({ x: 0, y: -contentInsetValue }),
-    [contentInsetValue],
-  );
+    () => ({ x: 0, y: -contentInset }),
+    [contentInset]
+  )
 
   const memoContentContainerStyle = React.useMemo(
-    () => [
-      _contentContainerStyle,
-      // TODO: investigate types
-      contentContainerStyle as any,
-    ],
-    [_contentContainerStyle, contentContainerStyle],
-  );
-  const memoStyle = React.useMemo(() => [_style, style], [_style, style]);
+    () => [_contentContainerStyle, contentContainerStyle as any],
+    [_contentContainerStyle, contentContainerStyle]
+  )
+  const memoStyle = React.useMemo(() => [_style, style], [_style, style])
 
   return (
+    // @ts-expect-error typescript cannot preserve the generic item type through memoized RNGH animated component
     <FlatListMemo
       {...rest}
       onLayout={onLayout}
-      // @ts-expect-error - TODO: investigate type issues with ref
       ref={innerRef}
       bouncesZoom={false}
       style={memoStyle}
@@ -129,13 +110,11 @@ function RabbyFlatList<R>({
       contentOffset={memoContentOffset}
       automaticallyAdjustContentInsets={false}
       refreshControl={memoRefreshControl}
-      // workaround for: https://github.com/software-mansion/react-native-reanimated/issues/2735
       onMomentumScrollEnd={() => {}}
     />
-  );
+  )
 }
 
-/**
- * Use like a regular FlatList.
- */
-export { RabbyFlatList };
+export const RabbyFlatList = React.forwardRef(RabbyFlatListImpl) as <T>(
+  props: Omit<FinalProps<T>, 'onScroll'> & { ref?: React.Ref<FinalType<T>> }
+) => React.ReactElement

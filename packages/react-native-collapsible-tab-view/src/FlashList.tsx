@@ -1,15 +1,16 @@
 import type {
-  FlashListRef,
   FlashListProps,
+  FlashListRef,
 } from '@shopify/flash-list'
 import React, { useCallback } from 'react'
-import Animated from 'react-native-reanimated'
+import Animated, {
+  useSharedValue,
+  useAnimatedReaction,
+} from 'react-native-reanimated'
 
 import {
-  useAfterMountEffect,
   useChainCallback,
   useCollapsibleStyle,
-  useConvertAnimatedToValue,
   useScrollHandlerY,
   useSharedAnimatedRef,
   useTabNameContext,
@@ -34,10 +35,10 @@ const ensureFlastList = () => {
 
   try {
     const flashListModule = require('@shopify/flash-list')
-    AnimatedFlashList = (Animated.createAnimatedComponent(
+    AnimatedFlashList = Animated.createAnimatedComponent(
       flashListModule.FlashList
-    ) as unknown) as React.ComponentClass<FlashListProps<any>>
-  } catch (error) {
+    ) as unknown as React.ComponentClass<FlashListProps<any>>
+  } catch {
     console.error(
       'The optional dependency @shopify/flash-list is not installed. Please install it to use the FlashList component.'
     )
@@ -72,12 +73,22 @@ function FlashListImpl<R>(
 
   const { scrollHandler, enable } = useScrollHandlerY(name)
 
-  const onLayout = useAfterMountEffect(rest.onLayout, () => {
-    'worklet'
-    // we enable the scroll event after mounting
-    // otherwise we get an `onScroll` call with the initial scroll position which can break things
-    enable(true)
-  })
+  const hadLoad = useSharedValue(false)
+
+  const onLoad = useCallback(() => {
+    hadLoad.value = true
+  }, [hadLoad])
+
+  useAnimatedReaction(
+    () => {
+      return hadLoad.value
+    },
+    (ready) => {
+      if (ready) {
+        enable(true)
+      }
+    }
+  )
 
   const { progressViewOffset, contentContainerStyle } = useCollapsibleStyle()
 
@@ -90,10 +101,10 @@ function FlashListImpl<R>(
   })
 
   const scrollContentSizeChangeHandlers = useChainCallback(
-    React.useMemo(() => [scrollContentSizeChange, onContentSizeChange], [
-      onContentSizeChange,
-      scrollContentSizeChange,
-    ])
+    React.useMemo(
+      () => [scrollContentSizeChange, onContentSizeChange],
+      [onContentSizeChange, scrollContentSizeChange]
+    )
   )
 
   const memoRefreshControl = React.useMemo(
@@ -106,15 +117,14 @@ function FlashListImpl<R>(
     [progressViewOffset, refreshControl]
   )
 
-  const contentInsetValue = useConvertAnimatedToValue<number>(contentInset)
-
-  const memoContentInset = React.useMemo(() => ({ top: contentInsetValue }), [
-    contentInsetValue,
-  ])
+  const memoContentInset = React.useMemo(
+    () => ({ top: contentInset }),
+    [contentInset]
+  )
 
   const memoContentOffset = React.useMemo(
-    () => ({ x: 0, y: -contentInsetValue }),
-    [contentInsetValue]
+    () => ({ x: 0, y: -contentInset }),
+    [contentInset]
   )
 
   const memoContentContainerStyle = React.useMemo(
@@ -131,7 +141,7 @@ function FlashListImpl<R>(
       // We are not accessing the right element or view of the Flashlist (recyclerlistview). So we need to give
       // this ref the access to it
       // eslint-ignore
-      ;(recyclerRef as any)(value?.getNativeScrollRef?.())
+      ;(recyclerRef as any)((value as any)?.recyclerlistview_unsafe)
       ;(ref as any)(value)
     },
     [recyclerRef, ref]
@@ -141,7 +151,7 @@ function FlashListImpl<R>(
     // @ts-expect-error typescript complains about `unknown` in the memo, it should be T
     <FlashListMemo
       {...rest}
-      onLayout={onLayout}
+      onLoad={onLoad}
       ref={refWorkaround}
       contentContainerStyle={memoContentContainerStyle}
       bouncesZoom={false}

@@ -17,7 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import RNFS from '@rabby-wallet/react-native-fs';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 
 import RcIconQuestionCC from '@/assets/icons/transaction-record/icon-question-cc.svg';
 import RcIconEyeCloseCC from '@/assets2024/icons/home/eye-close-cc.svg';
@@ -3806,7 +3806,6 @@ export default function DevDataKeychain(): JSX.Element {
   const renderTabScrollView = (children: React.ReactNode) => {
     return (
       <Tabs.ScrollView
-        tvParallaxProperties={undefined}
         horizontal={false}
         nestedScrollEnabled={false}
         contentContainerStyle={styles.scrollView}>

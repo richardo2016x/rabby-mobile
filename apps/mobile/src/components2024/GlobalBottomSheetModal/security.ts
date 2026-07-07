@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { MODAL_ID } from './types';
+import type { MODAL_ID } from './types';
 import { zCreate } from '@/core/utils/reexports';
 import { resolveValFromUpdater, UpdaterOrPartials } from '@/core/utils/store';
 

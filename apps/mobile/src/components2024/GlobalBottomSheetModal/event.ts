@@ -1,5 +1,5 @@
 import { makeEEClass } from '@/core/apis/event';
-import { GlobalSheetModalListeners } from './types';
+import type { GlobalSheetModalListeners } from './types';
 
 export const globalSheetModalEvents =
   new (makeEEClass<GlobalSheetModalListeners>().EventEmitter)();

@@ -58,9 +58,8 @@ sentryfn_build_sourcemap() {
 
   mkdir -p $RMRN_BUNDLE_DIR;
 
-  $project_dir/node_modules/.bin/react-native bundle \
+  sh "$project_dir/scripts/react-native-bundle.sh" \
     --platform $BUILD_TARGET_PLATFORM \
-    --reset-cache \
     --dev false \
     --minify false \
     --entry-file index.js \

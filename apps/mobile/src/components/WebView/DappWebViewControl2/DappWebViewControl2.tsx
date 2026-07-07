@@ -39,6 +39,7 @@ import AutoLockView from '@/components/AutoLockView';
 import { PATCH_ANCHOR_TARGET } from '@/core/bridges/builtInScripts/patchAnchor';
 import { IS_ANDROID } from '@/core/native/utils';
 import { checkShouldStartLoadingWithRequestForDappWebView } from '../utils';
+import { useMarkAndroidWebViewDemand } from '../androidWebViewWarmup';
 import { FontNames } from '@/core/utils/fonts';
 import { DappWebViewHideContext } from '@/screens/Dapps/hooks/useDappView';
 import { TouchableOpacity } from 'react-native-gesture-handler';
@@ -315,6 +316,8 @@ const DappWebViewControl2 = ({
     },
     // onSelfClose,
   });
+
+  useMarkAndroidWebViewDemand(entryScriptWeb3Loaded, 'dapp-webview-control2');
 
   const initialUrl = useMemo(() => {
     if (!_initialUrl) return convertToWebviewUrl(dappOrigin);

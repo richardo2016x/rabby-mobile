@@ -1,7 +1,7 @@
 import { FlatList, Platform, SectionList, I18nManager } from 'react-native'
-import Animated, { scrollTo } from 'react-native-reanimated'
+import Animated, { AnimatedRef, scrollTo } from 'react-native-reanimated'
 
-import { Ref, RefComponent } from './types'
+import { RefComponent } from './types'
 
 /** The time one frame takes at 60 fps (16 ms) */
 export const ONE_FRAME_MS = 16
@@ -16,7 +16,7 @@ export const AnimatedFlatList = Animated.createAnimatedComponent(FlatList)
 export const AnimatedSectionList = Animated.createAnimatedComponent(SectionList)
 
 export function scrollToImpl<T extends RefComponent>(
-  ref: Ref<T> | undefined,
+  ref: AnimatedRef<T> | undefined,
   x: number,
   y: number,
   animated: boolean
@@ -26,6 +26,5 @@ export function scrollToImpl<T extends RefComponent>(
   // ensure we don't scroll on NaN
   if (!Number.isFinite(x) || !Number.isFinite(y)) return
 
-  // @ts-expect-error
   scrollTo(ref, x, y, animated)
 }

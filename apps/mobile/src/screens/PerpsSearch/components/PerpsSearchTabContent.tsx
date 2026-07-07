@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { MarketData } from '@/hooks/perps/usePerpsStore';
 import { PerpsCategoryId } from '../../Perps/constants/perpsCategories';
 import { PerpsMarketItem } from '../../Perps/components/PerpsMarketSection/PerpsMarketItem';

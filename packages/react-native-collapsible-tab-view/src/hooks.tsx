@@ -6,10 +6,15 @@ import {
   useContext,
   MutableRefObject,
   useEffect,
-  DependencyList,
   useRef,
 } from 'react'
-import { LayoutChangeEvent, StyleSheet, ViewProps } from 'react-native'
+import {
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  StyleSheet,
+  ViewProps,
+} from 'react-native'
 import { PagerViewOnPageScrollEvent } from 'react-native-pager-view'
 import Animated, {
   cancelAnimation,
@@ -20,12 +25,13 @@ import Animated, {
   withDelay,
   withTiming,
   interpolate,
-  Extrapolate,
   runOnJS,
   runOnUI,
-  useDerivedValue,
   useEvent,
   useHandler,
+  AnimatedRef,
+  Extrapolation,
+  SharedValue,
 } from 'react-native-reanimated'
 import { useDeepCompareMemo } from 'use-deep-compare'
 
@@ -33,13 +39,12 @@ import { Context, TabNameContext } from './Context'
 import { IS_IOS, ONE_FRAME_MS, scrollToImpl } from './helpers'
 import {
   CollapsibleStyle,
+  ContainerRef,
   ContextType,
+  RefComponent,
   TabName,
   TabReactElement,
   TabsWithProps,
-  Ref,
-  ContainerRef,
-  RefComponent,
 } from './types'
 
 export function useContainerRef() {
@@ -48,19 +53,15 @@ export function useContainerRef() {
 
 export function useAnimatedDynamicRefs(): [
   ContextType['refMap'],
-  ContextType['setRef']
+  ContextType['setRef'],
 ] {
   const [map, setMap] = useState<ContextType['refMap']>({})
-  const setRef = useCallback(function <T extends RefComponent>(
-    key: TabName,
-    ref: React.RefObject<T | null>
-  ) {
+  const setRef = useCallback((key: TabName, ref: AnimatedRef<RefComponent>) => {
     setMap((map) => ({ ...map, [key]: ref }))
     return ref
-  },
-  [])
+  }, [])
 
-  return [map, setRef]
+  return [map, setRef as ContextType['setRef']]
 }
 
 export function useTabProps<T extends TabName>(
@@ -125,6 +126,20 @@ export function useTabNameContext(): TabName {
   return c
 }
 
+export function useLayoutHeight(initialHeight: number = 0) {
+  const [height, setHeight] = useState(initialHeight)
+
+  const getHeight = useCallback(
+    (event: LayoutChangeEvent) => {
+      const latestHeight = event.nativeEvent.layout.height
+      if (latestHeight !== height) {
+        setHeight(latestHeight)
+      }
+    },
+    [height, setHeight]
+  )
+  return [height, getHeight] as const
+}
 /**
  * Hook to access some key styles that make the whole thing work.
  *
@@ -139,15 +154,9 @@ export function useCollapsibleStyle(): CollapsibleStyle {
     allowHeaderOverscroll,
     minHeaderHeight,
   } = useTabsContext()
-  const [containerHeightVal, tabBarHeightVal, headerHeightVal] = [
-    useConvertAnimatedToValue(containerHeight),
-    useConvertAnimatedToValue(tabBarHeight),
-    useConvertAnimatedToValue(headerHeight),
-  ]
-
   const containerHeightWithMinHeader = Math.max(
     0,
-    (containerHeightVal ?? 0) - minHeaderHeight
+    (containerHeight ?? 0) - minHeaderHeight
   )
 
   return useMemo(
@@ -156,24 +165,24 @@ export function useCollapsibleStyle(): CollapsibleStyle {
       contentContainerStyle: {
         minHeight:
           IS_IOS && !allowHeaderOverscroll
-            ? containerHeightWithMinHeader - (tabBarHeightVal || 0)
-            : containerHeightWithMinHeader + (headerHeightVal || 0),
+            ? containerHeightWithMinHeader - (tabBarHeight || 0)
+            : containerHeightWithMinHeader + (headerHeight || 0),
         paddingTop:
           IS_IOS && !allowHeaderOverscroll
             ? 0
-            : (headerHeightVal || 0) + (tabBarHeightVal || 0),
+            : (headerHeight || 0) + (tabBarHeight || 0),
       },
       progressViewOffset:
         // on iOS we need the refresh control to be at the top if overscrolling
         IS_IOS && allowHeaderOverscroll
           ? 0
           : // on android we need it below the header or it doesn't show because of z-index
-            (headerHeightVal || 0) + (tabBarHeightVal || 0),
+            (headerHeight || 0) + (tabBarHeight || 0),
     }),
     [
       allowHeaderOverscroll,
-      headerHeightVal,
-      tabBarHeightVal,
+      headerHeight,
+      tabBarHeight,
       width,
       containerHeightWithMinHeader,
     ]
@@ -227,7 +236,7 @@ export function useScroller<T extends RefComponent>() {
 
   const scroller = useCallback(
     (
-      ref: Ref<T> | undefined,
+      ref: AnimatedRef<T> | undefined,
       x: number,
       y: number,
       animated: boolean,
@@ -237,9 +246,9 @@ export function useScroller<T extends RefComponent>() {
       if (!ref) return
       //! this is left here on purpose to ease troubleshooting (uncomment when necessary)
       // console.log(
-      //   `${_debugKey}, y: ${y}, y adjusted: ${y - contentInset.value}`
+      //   `${_debugKey}, y: ${y}, y adjusted: ${y - contentInset}`
       // )
-      scrollToImpl(ref, x, y - contentInset.value, animated)
+      scrollToImpl(ref, x, y - contentInset, animated)
     },
     [contentInset]
   )
@@ -247,22 +256,42 @@ export function useScroller<T extends RefComponent>() {
   return scroller
 }
 
-type ScrollHandlerOptions = {
-  pullDownDistance?: Animated.SharedValue<number>
+type ScrollableEvent<
+  C extends Record<string, unknown> = Record<string, unknown>,
+> = (
+  event: Pick<NativeSyntheticEvent<NativeScrollEvent>, 'nativeEvent'>,
+  context: C
+) => void
+
+export type ScrollHandlerProps = {
+  onScroll?: ScrollableEvent
+  onAnimatedScrollBeginDrag?: ScrollableEvent
+  onAnimatedScrollEndDrag?: ScrollableEvent
+  onAnimatedScrollMomentumBegin?: ScrollableEvent
+  onAnimatedScrollMomentumEnd?: ScrollableEvent
+  scrollableEnabled?: SharedValue<boolean>
 }
 
 export const useScrollHandlerY = (
   name: TabName,
-  { pullDownDistance }: ScrollHandlerOptions = {}
+  {
+    onScroll,
+    onAnimatedScrollBeginDrag,
+    onAnimatedScrollEndDrag,
+    onAnimatedScrollMomentumBegin,
+    onAnimatedScrollMomentumEnd,
+    scrollableEnabled: propScrollableEnabled,
+  }: ScrollHandlerProps = {}
 ) => {
   const {
     accDiffClamp,
     focusedTab,
+    visualFocusedTab,
+    pagerIsIdle,
     snapThreshold,
     revealHeaderOnScroll,
     refMap,
     tabNames,
-    index,
     headerHeight,
     contentInset,
     containerHeight,
@@ -278,7 +307,10 @@ export const useScrollHandlerY = (
     allowHeaderOverscroll,
   } = useTabsContext()
 
-  const enabled = useSharedValue(false)
+  const internalEnabled = useSharedValue(false)
+  const enabled = propScrollableEnabled || internalEnabled
+
+  const scrollTo = useScroller()
 
   const enable = useCallback(
     (toggle: boolean) => {
@@ -296,13 +328,6 @@ export const useScrollHandlerY = (
    */
   const afterDrag = useSharedValue(0)
 
-  const tabIndex = useMemo(() => tabNames.value.findIndex((n) => n === name), [
-    tabNames,
-    name,
-  ])
-
-  const scrollTo = useScroller()
-
   const scrollAnimation = useSharedValue<number | undefined>(undefined)
 
   useAnimatedReaction(
@@ -314,8 +339,11 @@ export const useScrollHandlerY = (
     }
   )
 
-  const onMomentumEnd = () => {
+  const onMomentumEnd = (event?: NativeScrollEvent, ctx?: any) => {
     'worklet'
+    if (onAnimatedScrollMomentumEnd && event) {
+      runOnJS(onAnimatedScrollMomentumEnd)({ nativeEvent: event }, ctx)
+    }
     if (!enabled.value) return
 
     if (typeof snapThreshold === 'number') {
@@ -366,43 +394,43 @@ export const useScrollHandlerY = (
     }
   }
 
-  const contentHeight = useDerivedValue(() => {
-    const tabIndex = tabNames.value.indexOf(name)
-    return contentHeights.value[tabIndex] || Number.MAX_VALUE
-  }, [])
-
   const scrollHandler = useAnimatedScrollHandler(
     {
-      onScroll: (event) => {
+      onScroll: (event, ctx) => {
+        if (onScroll) {
+          runOnJS(onScroll)({ nativeEvent: event }, ctx)
+        }
         if (!enabled.value) return
 
-        if (focusedTab.value === name) {
+        if (visualFocusedTab.value === name) {
           if (IS_IOS) {
             let { y } = event.contentOffset
             // normalize the value so it starts at 0
-            y = y + contentInset.value
-            if (pullDownDistance) {
-              pullDownDistance.value = Math.max(0, -y)
-            }
+            y = y + contentInset
+
+            const contentHeight =
+              contentHeights.value[tabNames.value.indexOf(name)] ||
+              Number.MAX_VALUE
+
             const clampMax =
-              contentHeight.value -
-              (containerHeight.value || 0) +
-              contentInset.value
+              contentHeight - (containerHeight || 0) + contentInset
             // make sure the y value is clamped to the scrollable size (clamps overscrolling)
             scrollYCurrent.value = allowHeaderOverscroll
               ? y
-              : interpolate(y, [0, clampMax], [0, clampMax], Extrapolate.CLAMP)
+              : interpolate(
+                  y,
+                  [0, clampMax],
+                  [0, clampMax],
+                  Extrapolation.CLAMP
+                )
           } else {
             const { y } = event.contentOffset
-            if (pullDownDistance) {
-              pullDownDistance.value = 0
-            }
             scrollYCurrent.value = y
           }
 
-          scrollY.value[index.value] = scrollYCurrent.value
+          scrollY.value[name] = scrollYCurrent.value
           oldAccScrollY.value = accScrollY.value
-          accScrollY.value = scrollY.value[index.value] + offset.value
+          accScrollY.value = scrollY.value[name] + offset.value
 
           if (revealHeaderOnScroll) {
             const delta = accScrollY.value - oldAccScrollY.value
@@ -420,7 +448,10 @@ export const useScrollHandlerY = (
           }
         }
       },
-      onBeginDrag: () => {
+      onBeginDrag: (event, ctx) => {
+        if (onAnimatedScrollBeginDrag) {
+          runOnJS(onAnimatedScrollBeginDrag)({ nativeEvent: event }, ctx)
+        }
         if (!enabled.value) return
 
         // ensure the header stops snapping
@@ -428,7 +459,10 @@ export const useScrollHandlerY = (
 
         if (IS_IOS) cancelAnimation(afterDrag)
       },
-      onEndDrag: () => {
+      onEndDrag: (event, ctx) => {
+        if (onAnimatedScrollEndDrag) {
+          runOnJS(onAnimatedScrollEndDrag)({ nativeEvent: event }, ctx)
+        }
         if (!enabled.value) return
 
         if (IS_IOS) {
@@ -440,13 +474,16 @@ export const useScrollHandlerY = (
               // never started, so we need to manually trigger the onMomentumEnd
               // to make sure we snap
               if (isFinished) {
-                onMomentumEnd()
+                onMomentumEnd(event, ctx)
               }
             })
           )
         }
       },
-      onMomentumBegin: () => {
+      onMomentumBegin: (event, ctx) => {
+        if (onAnimatedScrollMomentumBegin) {
+          runOnJS(onAnimatedScrollMomentumBegin)({ nativeEvent: event }, ctx)
+        }
         if (!enabled.value) return
 
         if (IS_IOS) {
@@ -481,13 +518,14 @@ export const useScrollHandlerY = (
     },
     (isSyncNeeded, wasSyncNeeded) => {
       if (
+        pagerIsIdle.value &&
         isSyncNeeded &&
         isSyncNeeded !== wasSyncNeeded &&
-        focusedTab.value !== name
+        visualFocusedTab.value !== name
       ) {
         let nextPosition: number | null = null
-        const focusedScrollY = scrollY.value[Math.round(indexDecimal.value)]
-        const tabScrollY = scrollY.value[tabIndex]
+        const focusedScrollY = scrollY.value[visualFocusedTab.value]
+        const tabScrollY = scrollY.value[name]
         const areEqual = focusedScrollY === tabScrollY
 
         if (!areEqual) {
@@ -506,7 +544,7 @@ export const useScrollHandlerY = (
             if (focusedIsOnTop) {
               nextPosition = snappingTo.value
             } else if (currIsOnTop) {
-              nextPosition = headerHeight.value || 0
+              nextPosition = headerHeight || 0
             }
           } else if (currIsOnTop || focusedIsOnTop) {
             nextPosition = Math.min(focusedScrollY, headerScrollDistance.value)
@@ -515,12 +553,12 @@ export const useScrollHandlerY = (
 
         if (nextPosition !== null) {
           // console.log(`sync ${name} ${nextPosition}`)
-          scrollY.value[tabIndex] = nextPosition
+          scrollY.value[name] = nextPosition
           scrollTo(refMap[name], 0, nextPosition, false, `[${name}] sync pane`)
         }
       }
     },
-    [revealHeaderOnScroll, refMap, snapThreshold, tabIndex, enabled, scrollTo]
+    [revealHeaderOnScroll, refMap, snapThreshold, enabled, scrollTo]
   )
 
   return { scrollHandler, enable }
@@ -561,20 +599,8 @@ export function useAfterMountEffect(
   nextOnLayout: ViewProps['onLayout'],
   effect: React.EffectCallback
 ) {
-  const name = useTabNameContext()
-  const {
-    //tabsMounted,
-    refMap,
-    scrollY,
-    //scrollYCurrent,
-    tabNames,
-  } = useTabsContext()
-
   const didExecute = useRef(false)
   const didMount = useSharedValue(false)
-
-  const scrollTo = useScroller()
-  const ref = name ? refMap[name] : null
 
   useAnimatedReaction(
     () => {
@@ -583,16 +609,7 @@ export function useAfterMountEffect(
     (didMount, prevDidMount) => {
       if (didMount && !prevDidMount) {
         if (didExecute.current) return
-        if (ref) {
-          const tabIndex = tabNames.value.findIndex((n) => n === name)
-          scrollTo(
-            ref,
-            0,
-            scrollY.value[tabIndex],
-            false,
-            `[${name}] restore scroll position`
-          )
-        }
+
         effect()
         didExecute.current = true
       }
@@ -615,7 +632,7 @@ export function useAfterMountEffect(
 export function useConvertAnimatedToValue<T>(
   animatedValue: Animated.SharedValue<T>
 ) {
-  const [value, setValue] = useState(animatedValue.value)
+  const [value, setValue] = useState<T>(animatedValue.value)
 
   useAnimatedReaction(
     () => {
@@ -629,7 +646,7 @@ export function useConvertAnimatedToValue<T>(
     [value]
   )
 
-  return value
+  return value || 0
 }
 
 export interface HeaderMeasurements {
@@ -640,7 +657,7 @@ export interface HeaderMeasurements {
   /**
    * Animated value that represents the height of the header
    */
-  height: Animated.SharedValue<number | undefined>
+  height: number
 }
 
 export function useHeaderMeasurements(): HeaderMeasurements {
@@ -683,9 +700,8 @@ export const usePageScrollHandler = (
       context: unknown
     ) => unknown
   },
-  dependencies?: DependencyList
+  dependencies?: unknown[]
 ) => {
-  // @ts-expect-error
   const { context, doDependenciesDiffer } = useHandler(handlers, dependencies)
   const subscribeForEvents = ['onPageScroll']
 

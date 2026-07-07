@@ -39626,7 +39626,6 @@ __metadata:
     react-native-bundle-splitter: "npm:^3.0.1"
     react-native-bundle-visualizer: "npm:3.1.0"
     react-native-cloud-storage: "npm:^1.4.1"
-    react-native-collapsible-tab-view: "npm:^6.2.1"
     react-native-crypto-js: "npm:^1.0.0"
     react-native-device-info: "npm:14.0.4"
     react-native-dotenv: "npm:^3.4.9"
@@ -40277,42 +40276,6 @@ __metadata:
     expo:
       optional: true
   checksum: 10/c4897534ab780d9f4d46fd774a87ceee02989434d41e64948ce43713de1f0fdca3ac598b81311aba719627494bedf3e8bfacbbcaa7b5a9c2518f21e2b5c8b048
-  languageName: node
-  linkType: hard
-
-"react-native-collapsible-tab-view@npm:6.2.1":
-  version: 6.2.1
-  resolution: "react-native-collapsible-tab-view@npm:6.2.1"
-  dependencies:
-    use-deep-compare: "npm:^1.1.0"
-  peerDependencies:
-    "@shopify/flash-list": ">=1.0.0"
-    react: "*"
-    react-native: "*"
-    react-native-pager-view: "*"
-    react-native-reanimated: ">=2.15.0"
-  peerDependenciesMeta:
-    "@shopify/flash-list":
-      optional: true
-  checksum: 10/6782afb6c2f831fb3a2a60517fac165a8f48c7d43baa1390b0a5500072b8a85159712f0e46c874c7461873a1f5b7da334645b0488104d5fcf1fab17d94ce3ac3
-  languageName: node
-  linkType: hard
-
-"react-native-collapsible-tab-view@patch:react-native-collapsible-tab-view@npm%3A6.2.1#./.yarn/patches/react-native-collapsible-tab-view-npm-6.2.1-a5b5774731.patch::locator=%40rabby-wallet%2Fmobile-monorepo%40workspace%3A.":
-  version: 6.2.1
-  resolution: "react-native-collapsible-tab-view@patch:react-native-collapsible-tab-view@npm%3A6.2.1#./.yarn/patches/react-native-collapsible-tab-view-npm-6.2.1-a5b5774731.patch::version=6.2.1&hash=9a13ba&locator=%40rabby-wallet%2Fmobile-monorepo%40workspace%3A."
-  dependencies:
-    use-deep-compare: "npm:^1.1.0"
-  peerDependencies:
-    "@shopify/flash-list": ">=1.0.0"
-    react: "*"
-    react-native: "*"
-    react-native-pager-view: "*"
-    react-native-reanimated: ">=2.15.0"
-  peerDependenciesMeta:
-    "@shopify/flash-list":
-      optional: true
-  checksum: 10/b1a44b2350f3b2189309d7b8954e566088eb800f6ff223edf7bf6217a7b6c8cb8300431f06971fc1acf811f8c2c0f0ab9a99e17743c44b4a1fcb782665661d46
   languageName: node
   linkType: hard
 

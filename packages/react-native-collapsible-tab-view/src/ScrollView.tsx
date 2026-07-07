@@ -6,7 +6,6 @@ import {
   useAfterMountEffect,
   useChainCallback,
   useCollapsibleStyle,
-  useConvertAnimatedToValue,
   useScrollHandlerY,
   useSharedAnimatedRef,
   useTabNameContext,
@@ -75,10 +74,10 @@ export const ScrollView = React.forwardRef<
     })
 
     const scrollContentSizeChangeHandlers = useChainCallback(
-      React.useMemo(() => [scrollContentSizeChange, onContentSizeChange], [
-        onContentSizeChange,
-        scrollContentSizeChange,
-      ])
+      React.useMemo(
+        () => [scrollContentSizeChange, onContentSizeChange],
+        [onContentSizeChange, scrollContentSizeChange]
+      )
     )
 
     const memoRefreshControl = React.useMemo(
@@ -91,15 +90,14 @@ export const ScrollView = React.forwardRef<
       [progressViewOffset, refreshControl]
     )
 
-    const contentInsetValue = useConvertAnimatedToValue(contentInset)
-
-    const memoContentInset = React.useMemo(() => ({ top: contentInsetValue }), [
-      contentInsetValue,
-    ])
+    const memoContentInset = React.useMemo(
+      () => ({ top: contentInset }),
+      [contentInset]
+    )
 
     const memoContentOffset = React.useMemo(
-      () => ({ x: 0, y: -contentInsetValue }),
-      [contentInsetValue]
+      () => ({ x: 0, y: -contentInset }),
+      [contentInset]
     )
 
     const memoContentContainerStyle = React.useMemo(

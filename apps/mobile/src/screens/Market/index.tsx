@@ -12,7 +12,7 @@ import { getMarketTabViewAction } from '@/screens/Market/analytics';
 import { matomoRequestEvent } from '@/utils/analytics';
 import { createGetStyles2024 } from '@/utils/styles';
 import { useAtom } from 'jotai';
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useTranslation } from 'react-i18next';
 
 import CustomLabel from '../TokenDetail/components/CustomLabel';

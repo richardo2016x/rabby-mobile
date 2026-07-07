@@ -32,6 +32,7 @@ import { useMemoizedFn } from 'ahooks';
 import { WebviewError } from '@/screens/Browser/BrowserScreen/components/BrowserTab/WebivewError';
 import { openExternalUrl } from '@/core/utils/linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMarkAndroidWebViewDemand } from './androidWebViewWarmup';
 
 const autoRunnerInjected = `${
   IS_ANDROID ? PATCH_ANCHOR_TARGET : ''
@@ -477,6 +478,11 @@ export default function DappWebViewCore({
   }, [progressBar, progress, isLoading]);
 
   const { bottom } = useSafeAreaInsets();
+
+  useMarkAndroidWebViewDemand(
+    !disabled && entryScriptWeb3Loaded && !!(embedHtml || resolvedUrl),
+    'dapp-webview-core',
+  );
 
   if (disabled) {
     return null;

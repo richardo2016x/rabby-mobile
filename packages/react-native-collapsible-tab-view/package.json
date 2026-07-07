@@ -1,8 +1,8 @@
 {
   "name": "@rabby-wallet/react-native-collapsible-tab-view",
-  "version": "6.2.1",
+  "version": "8.0.1",
   "private": true,
-  "description": "Rabby Mobile source fork of react-native-collapsible-tab-view 6.2.1",
+  "description": "Rabby Mobile source fork of react-native-collapsible-tab-view 8.0.1",
   "main": "lib/commonjs/index.js",
   "react-native": "src/index.tsx",
   "module": "lib/module/index.js",

@@ -6,6 +6,7 @@ import Animated, {
   runOnJS,
   withTiming,
   useAnimatedStyle,
+  SharedValue,
 } from 'react-native-reanimated'
 
 import { ScrollView } from './ScrollView'
@@ -27,24 +28,40 @@ export const Lazy: React.FC<{
    * Whether to start mounted. Defaults to true if we are the focused tab.
    */
   startMounted?: boolean
+  /**
+   * Mount when the pager is close enough to this tab.
+   */
+  preloadDistance?: number
+  indexDecimal?: SharedValue<number>
+  tabIndex?: number
   children: React.ReactElement
 }> = ({
   children,
   cancelLazyFadeIn,
   startMounted: _startMounted,
+  preloadDistance = 0,
+  indexDecimal,
+  tabIndex,
   mountDelayMs = 50,
 }) => {
   const name = useTabNameContext()
-  const { focusedTab, refMap } = useTabsContext()
+  const { visualFocusedTab, refMap } = useTabsContext()
+
+  const canPreload =
+    preloadDistance > 0 &&
+    indexDecimal !== undefined &&
+    typeof tabIndex === 'number'
 
   /**
-   * We start mounted if we are the focused tab, or if props.startMounted is true.
+   * We start mounted if we are the focused tab, if props.startMounted is true,
+   * or if this tab is inside the configured preload range.
    */
-  const startMounted = useSharedValue(
+  const shouldStartMounted =
     typeof _startMounted === 'boolean'
       ? _startMounted
-      : focusedTab.value === name
-  )
+      : visualFocusedTab.value === name ||
+        (canPreload &&
+          Math.abs(indexDecimal.value - tabIndex) <= preloadDistance)
 
   /**
    * We keep track of whether a layout has been triggered
@@ -54,13 +71,17 @@ export const Lazy: React.FC<{
   /**
    * This is used to control when children are mounted
    */
-  const [canMount, setCanMount] = React.useState(!!startMounted.value)
+  const [canMount, setCanMount] = React.useState(shouldStartMounted)
   /**
    * Ensure we don't mount after the component has been unmounted
    */
   const isSelfMounted = React.useRef(true)
 
-  const opacity = useSharedValue(cancelLazyFadeIn || startMounted.value ? 1 : 0)
+  let initialOpacity = 1
+  if (!cancelLazyFadeIn && !shouldStartMounted) {
+    initialOpacity = 0
+  }
+  const opacity = useSharedValue(initialOpacity)
 
   React.useEffect(() => {
     return () => {
@@ -68,18 +89,21 @@ export const Lazy: React.FC<{
     }
   }, [])
 
-  const startMountTimer = React.useCallback(() => {
-    // wait the scene to be at least mountDelay ms focused, before mounting
-    setTimeout(() => {
-      if (focusedTab.value === name) {
-        if (isSelfMounted.current) setCanMount(true)
-      }
-    }, mountDelayMs)
-  }, [focusedTab.value, mountDelayMs, name])
+  const startMountTimer = React.useCallback(
+    (focusedTab: string) => {
+      // wait the scene to be at least mountDelay ms focused, before mounting
+      setTimeout(() => {
+        if (focusedTab === name) {
+          if (isSelfMounted.current) setCanMount(true)
+        }
+      }, mountDelayMs)
+    },
+    [mountDelayMs, name]
+  )
 
   useAnimatedReaction(
     () => {
-      return focusedTab.value === name
+      return visualFocusedTab.value === name
     },
     (focused, wasFocused) => {
       if (focused && !wasFocused && !canMount) {
@@ -87,11 +111,35 @@ export const Lazy: React.FC<{
           opacity.value = 1
           runOnJS(setCanMount)(true)
         } else {
-          runOnJS(startMountTimer)()
+          runOnJS(startMountTimer)(visualFocusedTab.value)
         }
       }
     },
-    [canMount, focusedTab]
+    [canMount, visualFocusedTab]
+  )
+
+  useAnimatedReaction(
+    () => {
+      if (!canPreload || canMount) return false
+
+      return Math.abs(indexDecimal!.value - tabIndex!) <= preloadDistance
+    },
+    (shouldPreload, wasPreloading) => {
+      if (shouldPreload && !wasPreloading && !canMount) {
+        if (cancelLazyFadeIn) {
+          opacity.value = 1
+        }
+        runOnJS(setCanMount)(true)
+      }
+    },
+    [
+      canMount,
+      canPreload,
+      cancelLazyFadeIn,
+      indexDecimal,
+      preloadDistance,
+      tabIndex,
+    ]
   )
 
   const scrollTo = useScroller()
@@ -116,7 +164,7 @@ export const Lazy: React.FC<{
     return {
       opacity: opacity.value,
     }
-  }, [])
+  }, [opacity])
 
   const onLayout = useCallback(() => {
     didTriggerLayout.value = true

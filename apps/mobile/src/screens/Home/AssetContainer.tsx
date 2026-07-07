@@ -7,7 +7,7 @@ import {
 } from '@/constant/layout';
 import { useTheme2024 } from '@/hooks/theme';
 
-import { Tabs } from 'react-native-collapsible-tab-view';
+import { Tabs } from '@rabby-wallet/react-native-collapsible-tab-view/src';
 import { useGlobalStatus } from '@/hooks/useGlobalStatus';
 import { NetWorkError } from '@/components2024/GlobalWarning/NetWorkError';
 import { PortfolioList } from './PortfolioList';

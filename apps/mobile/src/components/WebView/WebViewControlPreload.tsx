@@ -1,5 +1,10 @@
-import { useCallback, useMemo } from 'react';
-import { Dimensions, Platform, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Dimensions,
+  InteractionManager,
+  Platform,
+  StyleSheet,
+} from 'react-native';
 import { atom, useAtom } from 'jotai';
 import WebView, { WebViewProps } from 'react-native-webview';
 
@@ -9,8 +14,17 @@ import DappWebViewControl from './DappWebViewControl';
 import { SELF_CHECK_RPC_METHOD } from '@/constant/rpc';
 import { makeDebugBorder } from '@/utils/styles';
 import { BLANK_RABBY_PAGE } from './hooks';
+import { runAfterHomePostStartupReady } from '@/core/utils/homeStartupReady';
+import {
+  isAndroidWebViewWarmupSatisfied,
+  isNewArchitectureEnabled,
+  markAndroidWebViewWarmupSatisfied,
+  runAfterJsIdle,
+  subscribeAndroidWebViewWarmupSatisfied,
+} from './androidWebViewWarmup';
 
 const isAndroid = Platform.OS === 'android';
+const ANDROID_TOUCH_WEBVIEW_PRELOAD_QUIET_WINDOW_MS = 30_000;
 
 function getTouchHtml(inPageScript: string = '') {
   return `
@@ -62,9 +76,82 @@ const firstTouchedAtom = atom(!isAndroid);
  */
 export default function WebViewControlPreload() {
   const [firstTouched, setFirstTouched] = useAtom(firstTouchedAtom);
+  const shouldDelayPreload = isAndroid && isNewArchitectureEnabled();
+  const [canPreload, setCanPreload] = useState(
+    () => !isAndroid || isAndroidWebViewWarmupSatisfied(),
+  );
 
   const { entryScriptWeb3Loaded, entryScripts } =
     useJavaScriptBeforeContentLoaded();
+
+  useEffect(() => {
+    if (!isAndroid) {
+      return;
+    }
+
+    return subscribeAndroidWebViewWarmupSatisfied(() => {
+      setCanPreload(false);
+      setFirstTouched(true);
+    });
+  }, [setFirstTouched]);
+
+  useEffect(() => {
+    if (
+      !isAndroid ||
+      firstTouched ||
+      !entryScriptWeb3Loaded ||
+      isAndroidWebViewWarmupSatisfied()
+    ) {
+      return;
+    }
+
+    if (!shouldDelayPreload) {
+      setCanPreload(true);
+      return;
+    }
+
+    let quietWindowTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelIdleWait: (() => void) | null = null;
+    let interactionHandle: ReturnType<
+      typeof InteractionManager.runAfterInteractions
+    > | null = null;
+
+    const cancelHomePostReadyWait = runAfterHomePostStartupReady(
+      () => {
+        quietWindowTimer = setTimeout(() => {
+          if (isAndroidWebViewWarmupSatisfied()) {
+            return;
+          }
+
+          interactionHandle = InteractionManager.runAfterInteractions(() => {
+            cancelIdleWait = runAfterJsIdle(
+              () => {
+                if (!isAndroidWebViewWarmupSatisfied()) {
+                  setCanPreload(true);
+                }
+              },
+              {
+                timeoutMs: 30_000,
+              },
+            );
+          });
+        }, ANDROID_TOUCH_WEBVIEW_PRELOAD_QUIET_WINDOW_MS);
+      },
+      {
+        fallbackMs: 10_000,
+        label: 'android_touch_webview_preload',
+      },
+    );
+
+    return () => {
+      cancelHomePostReadyWait();
+      if (quietWindowTimer) {
+        clearTimeout(quietWindowTimer);
+      }
+      interactionHandle?.cancel?.();
+      cancelIdleWait?.();
+    };
+  }, [entryScriptWeb3Loaded, firstTouched, shouldDelayPreload]);
 
   // devLog(
   //   '[debug] entryScriptWeb3Loaded, firstTouched',
@@ -77,6 +164,7 @@ export default function WebViewControlPreload() {
   >(() => {
     devLog('[WebViewControlPreload] webview loadEnd, will force close it');
     setTimeout(() => {
+      markAndroidWebViewWarmupSatisfied('hidden-preload-load-end');
       setFirstTouched(true);
       devLog('[WebViewControlPreload] webview loadEnd, force closed it');
     }, 500);
@@ -92,6 +180,10 @@ export default function WebViewControlPreload() {
   if (firstTouched) return null;
 
   if (!entryScriptWeb3Loaded) return null;
+
+  if (isAndroidWebViewWarmupSatisfied()) return null;
+
+  if (!canPreload) return null;
 
   return (
     <DappWebViewControl

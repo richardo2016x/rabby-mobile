@@ -83,6 +83,7 @@ import InAppBrowser from 'react-native-inappbrowser-reborn';
 import { toast } from '@/components2024/Toast';
 import { useTranslation } from 'react-i18next';
 import { PerpsInvitePopup } from '@/screens/Perps/components/PerpsInvitePopup';
+import { useMarkAndroidWebViewDemand } from '@/components/WebView/androidWebViewWarmup';
 
 type BrowserTabProps = {
   origin: string;
@@ -274,6 +275,11 @@ export const BrowserTab = ({
 
   const { entryScriptWeb3Loaded, fullScript } =
     useJavaScriptBeforeContentLoaded();
+
+  const shouldRenderWebView =
+    !!url && /^https?:\/\//.test(url) && entryScriptWeb3Loaded;
+
+  useMarkAndroidWebViewDemand(shouldRenderWebView, 'browser-tab');
 
   const { onLoadStart, onMessage: onWebViewMessage } = useSetupWebview({
     dappOrigin: origin,
@@ -615,9 +621,7 @@ export const BrowserTab = ({
                       maxHeight: webviewContainerMaxHeight,
                     },
               ]}>
-              {!url ||
-              !/^https?:\/\//.test(url) ||
-              !entryScriptWeb3Loaded ? null : (
+              {!shouldRenderWebView ? null : (
                 <>
                   {isLoading ? (
                     <BrowserProgressBar

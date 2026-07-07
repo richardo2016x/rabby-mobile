@@ -5,8 +5,8 @@ import {
   MaterialTabBar,
   MaterialTabBarProps,
   MaterialTabItem,
-} from 'react-native-collapsible-tab-view';
-import { ItemLayout } from 'react-native-collapsible-tab-view/lib/typescript/src/MaterialTabBar/types';
+} from '@rabby-wallet/react-native-collapsible-tab-view/src';
+import { ItemLayout } from '@rabby-wallet/react-native-collapsible-tab-view/src/MaterialTabBar/types';
 import { AnimatedStyle } from 'react-native-reanimated';
 
 const disableInnerIndicator = {
