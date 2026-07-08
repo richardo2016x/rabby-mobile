@@ -1,15 +1,9 @@
 import { isNonPublicProductionEnv } from '@/constant';
 import { AppRootName, RootNames } from '@/constant/layout';
 import { isCached, preload } from 'react-native-bundle-splitter';
+import { PRELOAD_NAVIGATORS, PRELOAD_SCREENS } from './preloadNames';
 
-export const PRELOAD_SCREENS = {
-  [RootNames.Settings]: 'SettingsScreen',
-};
-
-export const PRELOAD_NAVIGATORS = {
-  [RootNames.StackTransaction]: RootNames.StackTransaction,
-  [RootNames.SingleAddressStack]: RootNames.SingleAddressStack,
-};
+export { PRELOAD_NAVIGATORS, PRELOAD_SCREENS };
 
 async function preloadNamedComponent(name?: string) {
   if (__DEV__ || !name || isCached(name)) {
@@ -19,7 +13,12 @@ async function preloadNamedComponent(name?: string) {
   await preload().component(name);
 }
 
+async function ensureSettingsScreenRegistered() {
+  await import('@/perfs/loadables/settingsNavigatorScreens');
+}
+
 export async function preloadSettingsScreen() {
+  await ensureSettingsScreenRegistered();
   await preloadNamedComponent(PRELOAD_SCREENS[RootNames.Settings]);
 }
 
