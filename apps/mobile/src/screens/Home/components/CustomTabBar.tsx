@@ -39,7 +39,6 @@ import { ChainListItem } from '@/components2024/SelectChainWithDistribute';
 import { useTranslation } from 'react-i18next';
 import { useHomeDrawerOpacityStyle } from '../hooks/useHomeDrawerAnimate';
 import { HOME_TOP_HEADER_SIZES } from '@/constant/home';
-import { useValueFromSharedValue } from '@/hooks/reanimated';
 import {
   apisHomeTabIndex,
   HomeTabName,
@@ -365,16 +364,20 @@ function AssetsTabBar() {
         [0, 0.1, 0.5, 1],
         Extrapolation.CLAMP,
       ),
-      translateY: interpolate(
-        indexDecimal.value,
-        [0, 0.5, 1],
-        [
-          -HOME_TOP_HEADER_SIZES.tabItemLineHeight,
-          -HOME_TOP_HEADER_SIZES.tabItemLineHeight / 2,
-          0,
-        ],
-        Extrapolation.CLAMP,
-      ),
+      transform: [
+        {
+          translateY: interpolate(
+            indexDecimal.value,
+            [0, 0.5, 1],
+            [
+              -HOME_TOP_HEADER_SIZES.tabItemLineHeight,
+              -HOME_TOP_HEADER_SIZES.tabItemLineHeight / 2,
+              0,
+            ],
+            Extrapolation.CLAMP,
+          ),
+        },
+      ],
     };
   });
 
@@ -383,8 +386,6 @@ function AssetsTabBar() {
       pointerEvents: indexDecimal.value < 1 ? 'none' : 'auto',
     };
   });
-
-  const focusedTab = useValueFromSharedValue(apisHomeTabIndex.svTabName);
 
   return (
     <Animated.View
@@ -421,7 +422,7 @@ export const HomeCustomMaterialTabBar = ({}: Partial<
 
   const containerStyle = useAnimatedStyle(() => {
     return {
-      zIndex: indexDecimal.value < 1 ? -1 : 10,
+      pointerEvents: indexDecimal.value < 1 ? 'none' : 'auto',
     };
   });
 

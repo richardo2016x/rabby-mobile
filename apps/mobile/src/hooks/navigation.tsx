@@ -340,6 +340,12 @@ export const TabbarLabels: {
   [HomeTabName.defi]: { index: 2, label: 'DeFi' },
   [HomeTabName.nft]: { index: 3, label: 'NFT' },
 };
+const HOME_TAB_NAMES = [
+  HomeTabName.overview,
+  HomeTabName.token,
+  HomeTabName.defi,
+  HomeTabName.nft,
+] as const;
 const homeTabScrollerRef = React.createRef<CollapsibleRef<string>>();
 // const tabIndexRef: RefLikeObject<number> = { current: 0 };
 const tabIndexSvs = {
@@ -363,10 +369,7 @@ export const apisHomeTabIndex = {
   onTabSvsChange: (val: number, tabName?: HomeTabName) => {
     'worklet';
     tabIndexSvs.svIndexDecimal.value = val;
-    tabIndexSvs.current = Math.floor(val);
-    if (tabName) {
-      tabIndexSvs.svTabName.value = tabName;
-    }
+    tabIndexSvs.current = Math.round(val);
   },
   isHomeAtFirstTab() {
     return tabIndexSvs.svIndexDecimal.value === 0;
@@ -378,6 +381,7 @@ export const apisHomeTabIndex = {
     } else {
       tabIndexSvs.svIndexDecimal.value = val;
       tabIndexSvs.current = val;
+      tabIndexSvs.svTabName.value = HOME_TAB_NAMES[val] ?? HomeTabName.overview;
       runOnJS(() => tabIndexStore.setState({ tabIndex: val }))();
     }
   },

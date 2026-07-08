@@ -83,10 +83,7 @@ export const TabsMultiAssets: React.FC<TabMultiAssetsProps> = () => {
         // renderHeader={renderTabHeaderStub}
         workletOnIndexDecimalChange={ctx => {
           'worklet';
-          apisHomeTabIndex.onTabSvsChange(
-            ctx.indexDecimal,
-            ctx.tabName as HomeTabName,
-          );
+          apisHomeTabIndex.onTabSvsChange(ctx.indexDecimal);
         }}
         renderHeader={() => null}
         renderTabBar={() => null}
