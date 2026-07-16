@@ -304,9 +304,7 @@ export function TabsTopHeader(): JSX.Element {
         onPress={() => handleSwitchToTokenTab(1)}>
         {showRightArea ? (
           <>
-            {focusedTab === HomeTabName.overview ? (
-              <FeedbackHistoryHeaderEntry style={styles.feedbackEntry} />
-            ) : null}
+            <FeedbackHistoryHeaderEntry style={styles.feedbackEntry} />
 
             <AddressListScreenButton type="address" />
             <Pressable

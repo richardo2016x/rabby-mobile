@@ -315,7 +315,7 @@ export const FeedbackHistoryBottomSheet: React.FC = () => {
   );
   const replyTextRef = useRef('');
   const [hasReplyText, setHasReplyText] = useState(false);
-  const [replyInputResetKey, setReplyInputResetKey] = useState(0);
+  const replyInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const pendingScrollToBottomRef = useRef(false);
   const shouldScrollAfterReloadRef = useRef(false);
@@ -330,7 +330,7 @@ export const FeedbackHistoryBottomSheet: React.FC = () => {
   const clearReplyText = useCallback(() => {
     replyTextRef.current = '';
     setHasReplyText(false);
-    setReplyInputResetKey(key => key + 1);
+    replyInputRef.current?.clear();
   }, []);
   const scrollToBottom = useCallback((animated = false) => {
     setTimeout(() => {
@@ -746,7 +746,7 @@ export const FeedbackHistoryBottomSheet: React.FC = () => {
 
                 <ReplyComposer
                   key="reply-composer"
-                  inputResetKey={replyInputResetKey}
+                  inputRef={replyInputRef}
                   onChangeText={handleReplyTextChange}
                   hasReplyText={hasReplyText}
                   selectedMedia={selectedMedia}
@@ -883,7 +883,7 @@ function FeedbackMessageItem({
 }
 
 function ReplyComposer({
-  inputResetKey,
+  inputRef,
   onChangeText,
   hasReplyText,
   selectedMedia,
@@ -895,7 +895,7 @@ function ReplyComposer({
   uploadingMedia,
   mediaUploadReady,
 }: {
-  inputResetKey: number;
+  inputRef: React.Ref<React.ComponentRef<typeof TextInput>>;
   onChangeText: (text: string) => void;
   hasReplyText?: boolean;
   selectedMedia?: PickedFeedbackMedia | null;
@@ -931,7 +931,7 @@ function ReplyComposer({
       <View
         style={[styles.messageBubble, styles.userBubble, styles.replyBubble]}>
         <TextInput
-          key={inputResetKey}
+          ref={inputRef}
           onChangeText={onChangeText}
           multiline
           textAlignVertical="top"
@@ -940,15 +940,15 @@ function ReplyComposer({
           })}
           placeholderTextColor={styles.replyInputPlaceholder.color}
           style={styles.replyInput}
-          // enterKeyHint="send"
-          // onSubmitEditing={() => {
-          //   if (
-          //     !uploadingMedia &&
-          //     (hasReplyText || (selectedMedia && mediaUploadReady))
-          //   ) {
-          //     onSubmit?.();
-          //   }
-          // }}
+          enterKeyHint="send"
+          onSubmitEditing={() => {
+            if (
+              !uploadingMedia &&
+              (hasReplyText || (selectedMedia && mediaUploadReady))
+            ) {
+              onSubmit?.();
+            }
+          }}
         />
         {selectedMediaUri ? (
           <View style={styles.mediaPreviewContainer}>
