@@ -3666,8 +3666,8 @@
       "noAvailableAddress": "Tidak ada alamat yang tersedia"
     },
     "feedbackHistoryModal": {
-      "replyPlaceholder": "",
-      "mediaPlaceholder": "Gambar/Video"
+      "replyPlaceholder": "Masukkan balasan baru... (opsional)",
+      "mediaPlaceholder": "Gambar/Video\n(wajib)"
     }
   },
   "native": {

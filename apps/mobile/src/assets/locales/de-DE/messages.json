@@ -412,8 +412,8 @@
       "noAvailableAddress": "Keine verfügbare Adresse"
     },
     "feedbackHistoryModal": {
-      "replyPlaceholder": "",
-      "mediaPlaceholder": "Bild/Video"
+      "replyPlaceholder": "Neue Antwort eingeben... (optional)",
+      "mediaPlaceholder": "Bild/Video\n(erforderlich)"
     }
   },
   "page": {

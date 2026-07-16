@@ -694,7 +694,7 @@ function SettingsBlocks() {
             visible: !FORCE_DISABLE_FEEDBACK_BY_SCREENSHOT,
           },
           {
-            label: t('page.setting.bugReportChat'),
+            label: t('page.setting.bugReportHistory'),
             icon: RcBugReport,
             onPress: () => {
               toggleFeedbackHistoryVisible(true);
